@@ -24,13 +24,14 @@ module Crystalfaux
     # the keys that are down are shared state.
     class Keyboard
       # The modifier keys, as the bit set of Juggler's `modifiers` field
-      # (Playwright `server/firefox/ffInput.ts`, `toModifiersMask`).
+      # (Playwright `server/firefox/ffInput.ts`, `toModifiersMask`; the
+      # values of Firefox's `nsIDOMWindowUtils.MODIFIER_*`).
       @[Flags]
       enum Modifier
         Alt     = 1
         Control = 2
-        Meta    = 4
-        Shift   = 8
+        Shift   = 4
+        Meta    = 8
       end
 
       @lock = Sync::Mutex.new

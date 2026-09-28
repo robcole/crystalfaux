@@ -44,6 +44,9 @@ module Crystalfaux
         end
       end
 
+      # Resolves at the next animation frame; Juggler awaits the promise.
+      ANIMATION_FRAME_SCRIPT = "new Promise(requestAnimationFrame)"
+
       @lock = Sync::Mutex.new
       @x = 0.0
       @y = 0.0
@@ -91,7 +94,14 @@ module Crystalfaux
       end
 
       # Turns the wheel where the mouse is. Positive *delta_y* scrolls down.
+      #
+      # Waits for an animation frame first: wheel events reach the
+      # compositor, which must have the current layout to hit-test them
+      # (Playwright `server/firefox/ffInput.ts`, `RawMouseImpl.wheel`).
+      # Playwright waits in its utility world; this waits in the page's own
+      # world, which is the one `Page#evaluate` uses.
       def wheel(delta_x : Float64, delta_y : Float64) : Nil
+        @page.evaluate(ANIMATION_FRAME_SCRIPT)
         x, y = @lock.synchronize { {@x, @y} }
         @page.dispatch(Protocol::Page::DispatchWheelEvent.new(x.floor, y.floor, delta_x: delta_x, delta_y: delta_y,
           modifiers: @keyboard.modifiers.value))

@@ -48,16 +48,41 @@ describe Crystalfaux::Page::Mouse do
     fake.try &.close
   end
 
-  it "scrolls with a wheel event at its position and carries held modifiers" do
+  it "waits for an animation frame, then scrolls at its position with held modifiers" do
     browser, fake = scripted_browser
-    page = browser.new_context.new_page
+    page = loaded_page(browser)
+    fake.on("Runtime.evaluate") { [json_frame({id: 0, result: {} of String => String})] }
 
     page.mouse.move(30, 40)
     page.keyboard.down("Shift")
     page.mouse.wheel(0, 120)
 
+    fake.request("Runtime.evaluate")["params"]["expression"].should eq(JSON::Any.new("new Promise(requestAnimationFrame)"))
     fake.request("Page.dispatchWheelEvent")["params"].should eq(
-      json_frame({x: 30.0, y: 40.0, deltaX: 0.0, deltaY: 120.0, deltaZ: 0.0, modifiers: 8}))
+      json_frame({x: 30.0, y: 40.0, deltaX: 0.0, deltaY: 120.0, deltaZ: 0.0, modifiers: 4}))
+    methods = fake.methods
+    methods.index!("Runtime.evaluate").should be < methods.index!("Page.dispatchWheelEvent")
+  ensure
+    browser.try &.close
+    fake.try &.close
+  end
+
+  it "sends each held modifier as Firefox's modifier bit" do
+    browser, fake = scripted_browser
+    page = browser.new_context.new_page
+
+    expected = {"Alt" => 1, "Control" => 2, "Shift" => 4, "Meta" => 8}
+    sent = expected.keys.to_h do |key|
+      page.keyboard.down(key)
+      page.mouse.down
+      page.mouse.up
+      page.keyboard.up(key)
+      down, up = Array.new(2) { fake.request("Page.dispatchMouseEvent")["params"]["modifiers"].as_i }
+      down.should eq(up)
+      {key, down}
+    end
+
+    sent.should eq(expected)
   ensure
     browser.try &.close
     fake.try &.close
