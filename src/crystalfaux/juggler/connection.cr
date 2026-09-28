@@ -63,8 +63,10 @@ module Crystalfaux::Juggler
              session_id : String? = nil, timeout : Time::Span = DEFAULT_TIMEOUT) : JSON::Any
       deadline = Time.instant + timeout
       id, reply = register_request
-      request = Outgoing.new(encode(id, method, params, session_id))
       begin
+        # Encoding can raise (for example on NaN), so it runs inside the
+        # block that releases the pending entry.
+        request = Outgoing.new(encode(id, method, params, session_id))
         hand_off(request, method, timeout, deadline)
         message = await(reply, request, method, timeout, deadline)
       ensure

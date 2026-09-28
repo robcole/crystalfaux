@@ -1,5 +1,13 @@
 require "../../spec_helper"
 
+# Pending replies are internal state with no public view; this spec-only
+# reader lets the specs prove a failed call releases its entry.
+class Crystalfaux::Juggler::Connection
+  def pending_count_for_spec : Int32
+    @lock.synchronize { @pending.size }
+  end
+end
+
 describe Crystalfaux::Juggler::Connection do
   describe "#call" do
     it "sends the request and returns the result of the matching reply" do
@@ -77,6 +85,47 @@ describe Crystalfaux::Juggler::Connection do
       next_call = async { connection.call("Browser.getInfo") }
       peer.reply(peer.request["id"], {on_time: true})
       receive_within(next_call).should eq(JSON.parse(%({"on_time":true})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "releases the request when its params cannot be serialized" do
+      connection, peer = connected_pair
+
+      expect_raises(JSON::Error) { connection.call("Page.method", {value: Float64::NAN}) }
+
+      connection.pending_count_for_spec.should eq(0)
+      outcome = async { connection.call("Browser.getInfo") }
+      request = peer.request
+      request["method"].should eq("Browser.getInfo")
+      peer.reply(request["id"], {ok: true})
+      receive_within(outcome).should eq(JSON.parse(%({"ok":true})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "times out a queued call without sending it and stays usable" do
+      connection, peer = connected_pair
+      # Blocks the writer until the peer reads, which it does not do yet.
+      blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, timeout: 5.seconds) }
+      Fiber.yield
+      queued = async { connection.call("Browser.getInfo", timeout: 30.milliseconds) }
+
+      receive_within(queued).should be_a(Crystalfaux::TimeoutError)
+      connection.closed?.should be_false
+
+      blocked_request = peer.request
+      blocked_request["method"].should eq("Runtime.evaluate")
+      peer.reply(blocked_request["id"], {value: 1})
+      receive_within(blocked).should eq(JSON.parse(%({"value":1})))
+
+      later = async { connection.call("Browser.newPage") }
+      later_request = peer.request
+      later_request["method"].should eq("Browser.newPage")
+      peer.reply(later_request["id"], {targetId: "t1"})
+      receive_within(later).should eq(JSON.parse(%({"targetId":"t1"})))
     ensure
       connection.try &.close
       peer.try &.close
