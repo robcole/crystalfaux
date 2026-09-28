@@ -52,12 +52,27 @@ private class Probe
     load("data:text/html,<!DOCTYPE html><title>crystalfaux</title>")
     title = call(Protocol::Runtime::Evaluate.new(@execution_context_id, "[document.title, navigator.webdriver].join(' | ')", true))
     title.result.try(&.value).should eq(JSON::Any.new("crystalfaux | false"))
-    call(Protocol::Runtime::Evaluate.new(@execution_context_id, "undefined", true))
+    # `null` has an explicit null value; `undefined` has no value at all.
+    evaluate_value("null").should eq(JSON::Any.new(nil))
+    evaluate_value("undefined").should be_nil
     call(Protocol::Runtime::Evaluate.new(@execution_context_id, "throw new Error('boom')", true))
       .exception_details.should_not be_nil
+    # A thrown non-Error arrives as `exceptionDetails.value`. (`throw null`
+    # comes back as an `undefined` result, so it cannot be recorded.)
+    call(Protocol::Runtime::Evaluate.new(@execution_context_id, "throw 42", true))
+      .exception_details.try(&.value).should eq(JSON::Any.new(42_i64))
     arguments = [1_i64, 2_i64].map { |value| Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new(value)) }
     sum = call(Protocol::Runtime::CallFunction.new(@execution_context_id, "(a, b) => a + b", arguments, true))
     sum.result.try(&.value).should eq(JSON::Any.new(3_i64))
+    null_argument = [Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new(nil))]
+    kind = call(Protocol::Runtime::CallFunction.new(@execution_context_id, "(a) => a === null", null_argument, true))
+    kind.result.try(&.value).should eq(JSON::Any.new(true))
+  end
+
+  private def evaluate_value(expression : String) : JSON::Any?
+    result = call(Protocol::Runtime::Evaluate.new(@execution_context_id, expression, true)).result
+    result.should_not be_nil
+    result.try(&.value)
   end
 
   private def load_over_http(page_url : String) : Nil

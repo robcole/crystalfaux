@@ -23,7 +23,10 @@ module Crystalfaux::Protocol
       field valid_to : Float64
     end
 
-    # Milliseconds relative to `start_time`; `-1` when a phase did not run.
+    # Absolute timestamps in microseconds since the epoch, as
+    # `nsITimedChannel` reports them; `0` when a phase did not run, for
+    # example DNS and connect on a reused connection (Camoufox
+    # `additions/juggler/NetworkObserver.js` forwards them unchanged).
     struct ResourceTiming
       include Message
 

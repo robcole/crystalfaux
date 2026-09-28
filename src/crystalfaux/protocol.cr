@@ -41,10 +41,14 @@ module Crystalfaux::Protocol
     # Juggler leaves `result` out of the reply when a method returns nothing
     # (Camoufox `additions/juggler/protocol/Dispatcher.js` sends
     # `{id, sessionId, result}` with `result` undefined), and
-    # `Juggler::Connection#call` then returns a JSON `null`. That decodes as
-    # an empty object.
+    # `Juggler::Connection#call` then returns a JSON `null`. For an `Empty`
+    # result that decodes as an empty object; for any other result it raises
+    # `ProtocolError`.
     def decode_result(result : JSON::Any) : R
-      result = JSON::Any.new({} of String => JSON::Any) if result.raw.nil?
+      if result.raw.nil?
+        raise ProtocolError.new(method_name, "the reply has no result") unless R == Empty
+        result = JSON::Any.new({} of String => JSON::Any)
+      end
       Protocol.decode(R, result)
     end
   end
@@ -64,6 +68,28 @@ module Crystalfaux::Protocol
     macro field(decl, key = nil, emit_null = false)
       @[JSON::Field(key: {{ key || decl.var.stringify.camelcase(lower: true) }}, emit_null: {{ emit_null }})]
       getter {{ decl }}
+    end
+  end
+
+  # :nodoc:
+  #
+  # Declares `t.Any` fields named *names* as `JSON::Any?` getters. A field
+  # that is absent stays `nil` and is left out when encoded; a field that is
+  # an explicit JSON `null` decodes as `JSON::Any.new(nil)` and is written
+  # back as `null`. Runtime values need both: `undefined` has no `value`,
+  # `null` has `"value": null`. Call it once per struct.
+  macro any_fields(*names)
+    {% for name in names %}
+      @[JSON::Field(presence: true)]
+      getter {{ name.id }} : JSON::Any?
+      @[JSON::Field(ignore: true)]
+      @{{ name.id }}_present : Bool = false
+    {% end %}
+
+    protected def after_initialize
+      {% for name in names %}
+        @{{ name.id }} = JSON::Any.new(nil) if @{{ name.id }}_present && @{{ name.id }}.nil?
+      {% end %}
     end
   end
 

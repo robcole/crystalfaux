@@ -1,6 +1,6 @@
 # Recorded Juggler frames
 
-`probe.frames` holds every frame of one real Camoufox session, in the order
+`probe.frames` holds all 71 frames of one real Camoufox session, in the order
 the frames crossed the pipe. Each line is one frame: `> ` marks a frame that
 crystalfaux sent, `< ` marks a frame that the browser sent, and the rest of
 the line is the frame's JSON without changes. The offline specs in
@@ -17,8 +17,9 @@ The session follows the probe in `plans/landscape.md` Appendix A:
 `Browser.enable`, `Browser.getInfo`, `Browser.createBrowserContext`,
 `Browser.newPage` with `Browser.attachedToTarget`, `Page.frameAttached`,
 `Page.navigate` to a `data:` URL until its `load` event, and
-`Runtime.evaluate`. It then adds `Runtime.callFunction`, an evaluation that
-throws, a page load from a local `HTTP::Server` (network events,
+`Runtime.evaluate`. It then adds evaluations of `null` and `undefined`
+(`{"value":null}` versus no `value`), evaluations that throw an `Error` and
+a number, `Runtime.callFunction` with number and `null` arguments, a page load from a local `HTTP::Server` (network events,
 `Network.getResponseBody`, `Browser.getCookies`), `Page.setViewportSize`,
 a 2x2 `Page.screenshot`, `Page.dispatchMouseEvent`, `Page.close`,
 `Browser.removeBrowserContext` and `Browser.close`.

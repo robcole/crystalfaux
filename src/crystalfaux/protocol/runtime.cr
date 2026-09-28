@@ -13,7 +13,8 @@ module Crystalfaux::Protocol
       negative_zero: "-0", nan: "NaN")
 
     # A value returned by evaluation. With `returnByValue`, *value* holds the
-    # value; otherwise *object_id* names a handle in the page.
+    # value; otherwise *object_id* names a handle in the page. *value* is
+    # `nil` for `undefined` and `JSON::Any.new(nil)` for `null`.
     struct RemoteObject
       include Message
 
@@ -21,7 +22,7 @@ module Crystalfaux::Protocol
       field subtype : ObjectSubtype?
       field object_id : String?
       field unserializable_value : UnserializableValue?
-      field value : JSON::Any?
+      Protocol.any_fields value
     end
 
     struct ExceptionDetails
@@ -29,7 +30,7 @@ module Crystalfaux::Protocol
 
       field text : String?
       field stack : String?
-      field value : JSON::Any?
+      Protocol.any_fields value
     end
 
     # An argument to `CallFunction`: a handle, a special number, or a value.
@@ -38,7 +39,7 @@ module Crystalfaux::Protocol
 
       field object_id : String?
       field unserializable_value : UnserializableValue?
-      field value : JSON::Any?
+      Protocol.any_fields value
 
       def initialize(*, @value : JSON::Any? = nil, @object_id : String? = nil,
                      @unserializable_value : UnserializableValue? = nil)

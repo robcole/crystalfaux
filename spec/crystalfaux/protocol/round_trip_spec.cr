@@ -37,6 +37,16 @@ describe "Juggler protocol round trip" do
     JugglerRoundTrip.new(frames).failures.first.should contain("Page.frameAttached")
   end
 
+  it "keeps the recorded null result apart from the undefined one" do
+    results = FRAMES.select(&.text.includes?(%("result":{"result":{))).map do |frame|
+      Crystalfaux::Protocol.decode(Crystalfaux::Protocol::Runtime::EvaluationResult, frame.json["result"]).result
+    end
+    values = results.map(&.try(&.value))
+
+    values.should contain(JSON::Any.new(nil))
+    values.count(&.nil?).should be > 0
+  end
+
   it "decodes recorded events into typed values" do
     attached = FRAMES.find!(&.text.includes?(%("Browser.attachedToTarget"))).json["params"]
     event = Crystalfaux::Protocol.decode(Crystalfaux::Protocol::Browser::AttachedToTarget, attached)

@@ -43,6 +43,23 @@ describe Crystalfaux::Protocol do
       connection.try &.close
     end
 
+    it "raises when a reply without a result is not for an empty result" do
+      connection, peer = connected_pair
+      reply = Channel(Protocol::Runtime::EvaluationResult | Exception).new(1)
+      spawn do
+        reply.send(Protocol.call(connection, Protocol::Runtime::Evaluate.new("id-1", "1"), "session-1"))
+      rescue ex
+        reply.send(ex)
+      end
+
+      peer.raw(%({"id":#{peer.request["id"]},"sessionId":"session-1"}))
+
+      error = receive_within(reply).should be_a(Crystalfaux::ProtocolError)
+      error.message.should eq("Protocol error (Runtime.evaluate): the reply has no result")
+    ensure
+      connection.try &.close
+    end
+
     it "raises when the result does not match the schema" do
       connection, peer = connected_pair
       reply = Channel(Protocol::Browser::GetInfo::Result | Exception).new(1)
@@ -73,6 +90,20 @@ describe Crystalfaux::Protocol do
       JSON.parse(Protocol::Page::Screenshot.new(:jpeg, clip, quality: 80).to_json)["mimeType"].should eq("image/jpeg")
       Protocol::Page::LifecycleEvent::DomContentLoaded.to_json.should eq(%("DOMContentLoaded"))
       Protocol::Runtime::UnserializableValue::NegativeZero.to_json.should eq(%("-0"))
+    end
+
+    it "keeps an explicit null runtime value apart from an absent one" do
+      {% for type in [Protocol::Runtime::RemoteObject, Protocol::Runtime::ExceptionDetails, Protocol::Runtime::CallFunctionArgument] %}
+        explicit = {{ type }}.from_json(%({"value":null}))
+        explicit.value.should eq(JSON::Any.new(nil))
+        explicit.to_json.should eq(%({"value":null}))
+
+        absent = {{ type }}.from_json("{}")
+        absent.value.should be_nil
+        absent.to_json.should eq("{}")
+      {% end %}
+      Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new(nil)).to_json.should eq(%({"value":null}))
+      Protocol::Runtime::CallFunctionArgument.new(object_id: "o1").to_json.should eq(%({"objectId":"o1"}))
     end
 
     it "rejects an enum value the schema does not list" do
