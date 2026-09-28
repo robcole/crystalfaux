@@ -1,3 +1,4 @@
+require "http/headers"
 require "json"
 
 # Typed Juggler messages, written by hand from the vendored schema in

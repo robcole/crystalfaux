@@ -33,6 +33,10 @@ module Crystalfaux
   #   comes. Other pages on the connection are not affected.
   # - `Page.crashed` marks the page crashed: waiters, pending requests and
   #   later calls raise `PageCrashed`. `#close` still works.
+  # - The page's `Traffic` follows its network events and runs
+  #   `#on_request` and `#on_response` handlers in fibers of their own.
+  #   Closing the page, or a crash, fails `Response#body` waits with the
+  #   reason.
   class Page
     # The name of the isolated world whose execution contexts are tracked as
     # a frame's `utility_context_id`, as in Playwright
@@ -87,6 +91,7 @@ module Crystalfaux
     @cancellation = Juggler::Cancellation.new
     @keyboard : Keyboard?
     @mouse : Mouse?
+    @traffic = Traffic.new
 
     # :nodoc:
     #
@@ -212,6 +217,36 @@ module Crystalfaux
       call(event, Time.instant + Browser::DEFAULT_TIMEOUT)
     end
 
+    # Calls *handler* with each request of the page that the browser
+    # intercepted, and turns on interception for the page with the first
+    # handler.
+    #
+    # The handler decides the request with `Request#abort`,
+    # `Request#continue` or `Request#fulfill`. Handlers run in the order
+    # they were added until one decides; when none does, the page continues
+    # the request. A request that a `Context#block` rule matches is aborted
+    # before the handlers see it.
+    #
+    # Each request runs its handlers in a fiber of its own, so a handler
+    # may call page methods, and several requests can be in their handlers
+    # at once. An exception from a handler is logged.
+    #
+    # ```
+    # page.on_request do |request|
+    #   request.abort if request.url.includes?("/ads/")
+    # end
+    # ```
+    def on_request(timeout : Time::Span = Browser::DEFAULT_TIMEOUT, &handler : Request ->) : Nil
+      return unless @traffic.add_request_handler(handler)
+      call(Protocol::Network::SetRequestInterception.new(true), Time.instant + timeout)
+    end
+
+    # Calls *handler* with each response the page receives, in a fiber per
+    # response; see `Response#body`. An exception from a handler is logged.
+    def on_response(&handler : Response ->) : Nil
+      @traffic.add_response_handler(handler)
+    end
+
     # Closes the page. Safe to call more than once, and on a crashed page.
     #
     # Sends `Page.close`, then forgets the page even when that request
@@ -248,6 +283,7 @@ module Crystalfaux
       subscriptions.each { |subscription| @connection.off(subscription) }
       waiters.each(&.fail(reason))
       @cancellation.cancel(reason)
+      @traffic.dispose(reason)
     end
 
     # Sends `Page.close` for a page that `Browser` gave up on while opening
@@ -357,7 +393,8 @@ module Crystalfaux
       @lock.synchronize { @waiters.delete(waiter) } if waiter
     end
 
-    private def call(request : Protocol::Request(R), deadline : Time::Instant) : R forall R
+    # Sends *request* to the page's session. `Request` and `Response` use it.
+    protected def call(request : Protocol::Request(R), deadline : Time::Instant) : R forall R
       check_usable
       Protocol.call(@connection, request, @session_id, {deadline - Time.instant, Time::Span.zero}.max, @cancellation)
     end
@@ -390,6 +427,10 @@ module Crystalfaux
         update { context_destroyed(event.execution_context_id) }
       end
       listen(Protocol::Runtime::ExecutionContextsCleared) { update { contexts_cleared } }
+      listen(Protocol::Network::RequestWillBeSent) { |event| @traffic.request_will_be_sent(self, event) }
+      listen(Protocol::Network::ResponseReceived) { |event| @traffic.response_received(event) }
+      listen(Protocol::Network::RequestFinished) { |event| @traffic.request_finished(event.request_id) }
+      listen(Protocol::Network::RequestFailed) { |event| @traffic.request_failed(event) }
     end
 
     private def listen(type : T.class, &handler : T ->) : Nil forall T
@@ -478,6 +519,7 @@ module Crystalfaux
       end
       waiters.each(&.fail(failure))
       @cancellation.cancel(failure)
+      @traffic.dispose(failure)
     end
   end
 end

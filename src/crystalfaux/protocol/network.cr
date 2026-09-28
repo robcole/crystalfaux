@@ -11,6 +11,16 @@ module Crystalfaux::Protocol
 
       def initialize(@name : String, @value : String)
       end
+
+      # One header per value of *headers*, in order.
+      def self.list(headers : HTTP::Headers) : Array(HTTPHeader)
+        headers.flat_map { |name, values| values.map { |value| new(name, value) } }
+      end
+
+      # *headers* as `HTTP::Headers`; a repeated name keeps every value.
+      def self.to_http(headers : Array(HTTPHeader)) : HTTP::Headers
+        headers.each_with_object(HTTP::Headers.new) { |header, http| http.add(header.name, header.value) }
+      end
     end
 
     struct SecurityDetails

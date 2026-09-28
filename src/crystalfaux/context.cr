@@ -20,6 +20,9 @@ module Crystalfaux
 
     @closed = false
     @lock = Sync::Mutex.new
+    @blocked_types = Set(ResourceType).new
+    @blocked_urls = [] of Regex
+    @intercepting = false
 
     # :nodoc:
     def initialize(@browser : Browser, @id : String)
@@ -83,6 +86,77 @@ module Crystalfaux
 
     def closed? : Bool
       @lock.synchronize { @closed }
+    end
+
+    # Aborts every request of the context's pages whose resource type is in
+    # *types* or whose URL matches one of *urls*. A URL pattern is a
+    # `Regex`, or a glob `String` that matches the whole URL, where `**`
+    # matches any characters and `*` any characters except `/`. Rules add
+    # up over calls.
+    #
+    # The first call turns on request interception for the context
+    # (`Browser.setRequestInterception`). Blocked requests fail with the
+    # `blockedbyclient` error before `Page#on_request` handlers see them.
+    #
+    # ```
+    # context.block(types: [Crystalfaux::ResourceType::Image], urls: ["**/analytics/**"])
+    # ```
+    def block(*, types : Enumerable(ResourceType) = [] of ResourceType, urls : Enumerable(U) = [] of String,
+              timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil forall U
+      patterns = urls.map { |url| url_pattern(url) }
+      started = @lock.synchronize do
+        @blocked_types.concat(types)
+        @blocked_urls.concat(patterns)
+        @intercepting.tap { @intercepting = true }
+      end
+      return if started
+      begin
+        Protocol.call(@browser.connection, Protocol::Browser::SetRequestInterception.new(true, @id), timeout: timeout)
+      rescue ex
+        @lock.synchronize { @intercepting = false }
+        raise ex
+      end
+    end
+
+    # Adds *headers* to every request of the context's pages, replacing the
+    # headers of an earlier call.
+    def set_extra_headers(headers : HTTP::Headers, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+      request = Protocol::Browser::SetExtraHTTPHeaders.new(Protocol::Network::HTTPHeader.list(headers), @id)
+      Protocol.call(@browser.connection, request, timeout: timeout)
+    end
+
+    # See `#set_extra_headers`.
+    def extra_headers=(headers : HTTP::Headers) : HTTP::Headers
+      set_extra_headers(headers)
+      headers
+    end
+
+    # The cookies of the context, for every URL.
+    def cookies(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Array(Cookie)
+      Protocol.call(@browser.connection, Protocol::Browser::GetCookies.new(@id), timeout: timeout).cookies
+    end
+
+    def set_cookies(cookies : Enumerable(CookieOptions), timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+      Protocol.call(@browser.connection, Protocol::Browser::SetCookies.new(cookies.to_a, @id), timeout: timeout)
+    end
+
+    def clear_cookies(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+      Protocol.call(@browser.connection, Protocol::Browser::ClearCookies.new(@id), timeout: timeout)
+    end
+
+    # Whether a `#block` rule matches *request*.
+    protected def blocks?(request : Request) : Bool
+      @lock.synchronize do
+        @blocked_types.includes?(request.resource_type) || @blocked_urls.any?(&.matches?(request.url))
+      end
+    end
+
+    private def url_pattern(pattern : Regex) : Regex
+      pattern
+    end
+
+    private def url_pattern(glob : String) : Regex
+      URLGlob.to_regex(glob)
     end
 
     # Marks the context closed and returns whether it already was.
