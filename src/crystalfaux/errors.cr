@@ -75,6 +75,11 @@ module Crystalfaux
   class PageClosed < Error
   end
 
+  # Raised by `Pool#with_page` after `Pool#close`, and by a call that waits
+  # for a browser when the pool closes.
+  class PoolClosed < Error
+  end
+
   # Raised when `Fetch` cannot find, download, verify or install a Camoufox
   # build.
   class FetchError < Error
