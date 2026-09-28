@@ -110,7 +110,8 @@ describe Crystalfaux::Frame do
       _, child = page_with_child(browser, fake)
       fake.on("Runtime.evaluate") { reply({result: {value: "child"}}) }
 
-      child.evaluate("document.body.textContent").should eq(JSON::Any.new("child"))
+      # The timeout stays the second positional argument.
+      child.evaluate("document.body.textContent", 1.second).should eq(JSON::Any.new("child"))
 
       request = fake.request("Runtime.evaluate")
       request["params"]["executionContextId"].should eq(CHILD_CONTEXT)
@@ -182,6 +183,21 @@ describe Crystalfaux::Frame do
       fake.request("Runtime.evaluate")
 
       fake.event("Page.frameDetached", {frameId: CHILD_ID})
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::ExecutionContextDestroyed)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises ExecutionContextDestroyed when the browser clears the contexts during the call" do
+      browser, fake = scripted_browser
+      _, child = page_with_child(browser, fake)
+      fake.on("Runtime.callFunction") { [] of JSON::Any }
+      outcome = async { child.evaluate("new Promise(() => {})", world: :main, timeout: 5.seconds) }
+      fake.request("Runtime.callFunction")
+
+      fake.event("Runtime.executionContextsCleared", nil)
 
       receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::ExecutionContextDestroyed)
     ensure

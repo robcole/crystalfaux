@@ -42,8 +42,9 @@ module Crystalfaux::Protocol::Runtime
     # Decodes a serialized *value*; `nil` is `undefined`.
     #
     # `undefined` and `null` become JSON `null`, `NaN`, `Infinity`,
-    # `-Infinity` and `-0` become floats, a `Date` or `URL` becomes its ISO
-    # or URL string, a `RegExp` becomes `"/pattern/flags"`, and an `Error`
+    # `-Infinity` and `-0` become floats, also inside objects and arrays. A
+    # function or symbol becomes `nil` in place, so an object keeps its key.
+    # A `Date` or `URL` becomes its ISO or URL string, a `RegExp` becomes `"/pattern/flags"`, and an `Error`
     # becomes an object with its `name`, `message` and `stack`. An object
     # that the value holds twice is repeated.
     #
@@ -75,9 +76,7 @@ module Crystalfaux::Protocol::Runtime
         elsif items = hash["a"]?
           container(hash) { JSON::Any.new(items.as_a.map { |item| decode(item) }) }
         elsif entries = hash["o"]?
-          container(hash) do
-            JSON::Any.new(entries.as_a.to_h { |entry| {entry["k"].as_s, decode(entry["v"])} })
-          end
+          container(hash) { object(entries) }
         elsif ref = hash["ref"]?
           reference(ref.as_i64)
         elsif hash.has_key?("bi")
@@ -85,6 +84,15 @@ module Crystalfaux::Protocol::Runtime
         else
           raise EvaluationError.new("The result is not serializable as JSON: #{value.to_json}")
         end
+      end
+
+      # An entry whose value serialized to undefined, such as a function,
+      # has no "v"; its key stays, with `nil`.
+      private def object(entries : JSON::Any) : JSON::Any
+        JSON::Any.new(entries.as_a.to_h do |entry|
+          value = entry["v"]?
+          {entry["k"].as_s, value ? decode(value) : JSON::Any.new(nil)}
+        end)
       end
 
       private def special_value(name : String) : JSON::Any

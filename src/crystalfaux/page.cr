@@ -159,9 +159,9 @@ module Crystalfaux
     # To read page state without the main world, read what the page
     # writes to the DOM, for example
     # `page.evaluate("document.querySelector('#state').textContent")`.
-    def evaluate(expression : String, world : World = :isolated,
-                 timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
-      main_frame.evaluate(expression, world, timeout)
+    def evaluate(expression : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT,
+                 *, world : World = :isolated) : JSON::Any
+      main_frame.evaluate(expression, timeout, world: world)
     end
 
     # Runs `Frame#evaluate` for *frame*, a frame of this page.

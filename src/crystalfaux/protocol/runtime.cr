@@ -47,7 +47,10 @@ module Crystalfaux::Protocol
     end
 
     # Which frame and world an execution context belongs to. *name* is empty
-    # for the page's main world and the world name for an isolated world.
+    # for the frame's default world and the world name for a named world.
+    # Upstream Juggler makes the default world the page's main world;
+    # Camoufox makes it an isolated sandbox (`FrameTree.js`,
+    # `_createIsolatedContext`).
     struct AuxData
       include Message
 

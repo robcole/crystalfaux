@@ -52,6 +52,20 @@ describe Crystalfaux::Protocol::Runtime::MainWorld do
       decode(json).should eq(JSON.parse(%({"a":{"b":[1,null,null]}})))
     end
 
+    it "keeps an object property with no serialized value as nil" do
+      # The browser's reply for ({a: 1, f: () => 1}): the function serializes
+      # to undefined, so the entry has no "v".
+      decode(%({"o":[{"k":"a","v":1},{"k":"f"}],"id":1})).should eq(JSON.parse(%({"a":1,"f":null})))
+    end
+
+    it "keeps special numbers nested in objects and arrays" do
+      decoded = decode(%({"a":[{"v":"NaN"},{"v":"Infinity"},{"v":"-Infinity"},{"v":"-0"}],"id":1})).as_a.map(&.as_f)
+
+      decoded[0].nan?.should be_true
+      decoded[1..2].should eq([Float64::INFINITY, -Float64::INFINITY])
+      decoded[3].sign_bit.should eq(-1)
+    end
+
     it "returns a Date, a URL and a RegExp as strings" do
       decode(%({"d":"1970-01-01T00:00:00.000Z"})).should eq(JSON::Any.new("1970-01-01T00:00:00.000Z"))
       decode(%({"u":"https://example.com/"})).should eq(JSON::Any.new("https://example.com/"))

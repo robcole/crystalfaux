@@ -53,20 +53,26 @@ module Crystalfaux
     #   config key `allowMainWorld` set to `true`; without it, the call
     #   raises `EvaluationError`.
     #
-    # When the script returns a promise, the call waits for it. Values
-    # become JSON:
+    # When the script returns a promise, the call waits for it. Both worlds
+    # return `undefined` and `null` as `nil`, and a top-level `NaN`,
+    # `Infinity`, `-Infinity` or `-0` as a float. Inside objects and arrays
+    # the worlds differ:
     #
-    # - `undefined` and `null` become `nil`. In the isolated world,
-    #   `undefined` values in objects are left out, and in arrays become
-    #   `nil`.
-    # - `NaN`, `Infinity`, `-Infinity` and `-0` become floats.
-    # - Objects and arrays keep their nesting. Functions and symbols
-    #   become `nil`.
-    # - A `Date` becomes `{}` in the isolated world and its ISO string in the
-    #   main world; return `date.toISOString()` for the same value in both.
-    #   A DOM node becomes `{}` in the isolated world and `"ref: <Node>"` in
-    #   the main world. `Map`, `Set` and `RegExp` do not keep their contents
-    #   in the isolated world.
+    # | Value inside an object or array | Isolated world                      | Main world |
+    # | ------------------------------- | ----------------------------------- | ---------- |
+    # | `NaN`, `Infinity`, `-Infinity`  | `nil`                               | float      |
+    # | `-0`                            | `0`                                 | `-0.0`     |
+    # | `undefined`, function           | omitted in objects, `nil` in arrays | `nil`      |
+    # | symbol                          | the whole result becomes `nil`      | `nil`      |
+    #
+    # The isolated world serializes with `JSON.stringify` (Camoufox
+    # `additions/juggler/content/Runtime.js`, `_serialize`); the main world
+    # with Playwright's serializer, see `Protocol::Runtime::MainWorld`. A
+    # `Date` becomes `{}` in the isolated world and its ISO string in the
+    # main world; return `date.toISOString()` for the same value in both. A
+    # DOM node becomes `{}` in the isolated world and `"ref: <Node>"` in the
+    # main world. `Map`, `Set` and `RegExp` do not keep their contents in the
+    # isolated world.
     #
     # Raises `EvaluationError` with the message and stack when the script
     # throws or its promise rejects, and when the value holds a cycle or a
@@ -74,8 +80,8 @@ module Crystalfaux
     # execution context or loses it before the script returns, for example
     # during a navigation or after the frame was detached, and
     # `TimeoutError` after *timeout*.
-    def evaluate(expression : String, world : World = :isolated,
-                 timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
+    def evaluate(expression : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT,
+                 *, world : World = :isolated) : JSON::Any
       @page.evaluate_in(self, expression, world, Time.instant + timeout)
     end
 

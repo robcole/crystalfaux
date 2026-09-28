@@ -69,6 +69,14 @@ describe "Evaluation worlds", tags: "browser" do
     page.evaluate("({a: {b: [1, undefined, null]}, d: new Date(0)})", world: :main)
       .should eq(JSON.parse(%({"a":{"b":[1,null,null]},"d":"1970-01-01T00:00:00.000Z"})))
     page.evaluate("Promise.resolve(-0)", world: :main).as_f.sign_bit.should eq(-1)
+    nested = page.evaluate("[NaN, Infinity, -Infinity, -0]", world: :main).as_a.map(&.as_f)
+    nested[0].nan?.should be_true
+    nested[1..2].should eq([Float64::INFINITY, -Float64::INFINITY])
+    nested[3].sign_bit.should eq(-1)
+    # A symbol or a function becomes nil in place; the object keeps its keys.
+    page.evaluate("({a: 1, s: Symbol('s'), f() {}})", world: :main).should eq(JSON.parse(%({"a":1,"s":null,"f":null})))
+    child.evaluate("({a: 1, f: () => 1})", world: :main).should eq(JSON.parse(%({"a":1,"f":null})))
+    page.evaluate("[1, Symbol('s'), () => 1]", world: :main).should eq(JSON.parse("[1,null,null]"))
     expect_raises(Crystalfaux::EvaluationError, /cycle/) do
       page.evaluate("(() => { const a = {}; a.a = a; return a })()", world: :main)
     end
@@ -76,6 +84,12 @@ describe "Evaluation worlds", tags: "browser" do
       page.evaluate("throw new Error('main boom')", world: :main)
     end
     error.stack.should_not be_nil
+
+    # A navigation interrupts a main-world evaluation too.
+    outcome = async { page.evaluate("new Promise(() => {})", world: :main, timeout: 10.seconds) }
+    sleep 100.milliseconds
+    page.goto("#{server.base_url}/?again")
+    receive_within(outcome, 5.seconds).should be_a(Crystalfaux::ExecutionContextDestroyed)
   ensure
     browser.try &.close
     server.try &.close
@@ -96,6 +110,15 @@ describe "Evaluation worlds", tags: "browser" do
     page.evaluate("new Date(0)").should eq(JSON.parse("{}"))
     page.evaluate("new Date(0).toISOString()").should eq(JSON::Any.new("1970-01-01T00:00:00.000Z"))
     page.evaluate("() => 1").should eq(JSON::Any.new(nil))
+    # Nested values follow JSON.stringify: special numbers become null and
+    # -0 becomes 0, functions leave objects and become null in arrays, and a
+    # symbol anywhere makes the whole result nil.
+    page.evaluate("[NaN, Infinity, -Infinity, -0]").should eq(JSON.parse("[null,null,null,0]"))
+    page.evaluate("({n: NaN, z: -0})").should eq(JSON.parse(%({"n":null,"z":0})))
+    page.evaluate("({a: 1, f() {}})").should eq(JSON.parse(%({"a":1})))
+    page.evaluate("[1, () => 1]").should eq(JSON.parse("[1,null]"))
+    page.evaluate("({a: 1, s: Symbol('s')})").should eq(JSON::Any.new(nil))
+    page.evaluate("[1, Symbol('s')]").should eq(JSON::Any.new(nil))
     page.evaluate("new Promise(resolve => setTimeout(() => resolve('later'), 10))").should eq(JSON::Any.new("later"))
 
     error = expect_raises(Crystalfaux::EvaluationError, "rejected") { page.evaluate("Promise.reject(new Error('rejected'))") }
