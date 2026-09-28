@@ -1,0 +1,24 @@
+name: crystalfaux
+version: 0.1.0
+
+description: |
+  Launch and drive Camoufox over Playwright's Juggler protocol from Crystal,
+  without Node or Python at runtime.
+
+authors:
+  - Rob Cole <robcole@gmail.com>
+
+crystal: ">= 1.21.0"
+
+license: MIT
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba
+    version: ~> 1.7.0
+
+# Ameba 1.7 no longer builds itself on `shards install`. This target builds
+# it into bin/ameba with `shards build ameba`; bin/check does so when needed.
+targets:
+  ameba:
+    main: lib/ameba/bin/ameba.cr

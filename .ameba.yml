@@ -1,0 +1,7 @@
+# Ameba configuration. Run with `bin/ameba` after `shards install`.
+Globs:
+  - "src/**/*.cr"
+  - "spec/**/*.cr"
+
+Excluded:
+  - "lib/**"

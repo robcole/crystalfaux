@@ -1,1 +1,5 @@
 plans
+/lib/
+/.shards/
+*.dwarf
+/bin/ameba
