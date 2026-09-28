@@ -40,10 +40,17 @@ module Crystalfaux
   # has stopped and its profile is removed. It closes the browsers in the
   # slots, then waits for the launches and replacements that other fibers
   # have in progress. A launch that returns after `#close` started closes
-  # its browser before `#close` returns. The wait is bounded by the launch
-  # block's own timeout and by `Launcher::BrowserProcess#close`, which kills
-  # a process that does not stop in its grace period. `#close` does not wait
-  # for `#with_page` blocks.
+  # its browser before `#close` returns. After `#close` started, it alone
+  # closes the browsers in the slots; a `#with_page` call that ends then
+  # leaves its browser to it. `#close` does not wait for `#with_page`
+  # blocks.
+  #
+  # The pool puts no deadline on the launch block. `#close` waits as long as
+  # a launch in progress takes, so the launch block must bound its own time,
+  # as `Browser.launch` does with its *timeout*. Browser shutdown is bounded
+  # by `Launcher::BrowserProcess#close`, which kills a process that does not
+  # stop in its grace period. The launch block must not call `#close` of its
+  # own pool: that call raises `PoolError`.
   #
   # A block whose browser or page dies while it runs gets the error of its
   # next call: `PageCrashed`, `ConnectionClosed` or `PageClosed`. The pool
@@ -67,6 +74,8 @@ module Crystalfaux
     # progress. Each one is added with `@lock` held while the pool is open,
     # so nothing is added after `#close` starts to wait.
     @busy = WaitGroup.new
+    # The fibers that run the launch block now.
+    @launching = Set(Fiber).new
 
     # Makes a pool of *size* browsers. The pool calls *launch* with a launch
     # number (0, 1, 2, ...) each time it needs a browser; it launches none
@@ -107,8 +116,12 @@ module Crystalfaux
     # the calls that wait for a browser with `PoolClosed`. Returns when
     # every browser of the pool has stopped (see "Shutdown" above). Safe to
     # call more than once; each call waits.
+    #
+    # Raises `PoolError`, and changes nothing, when the launch block calls
+    # it: `#close` waits for that launch, which would never end.
     def close : Nil
       browsers = @lock.synchronize do
+        raise PoolError.new("Pool#close called from the pool's launch block") if @launching.includes?(Fiber.current)
         next if @closed
         @closed = true
         @idle.close
@@ -150,10 +163,15 @@ module Crystalfaux
       number = @lock.synchronize do
         raise PoolClosed.new("Pool is closed") if @closed
         @busy.add
+        @launching << Fiber.current
         @launches.tap { @launches += 1 }
       end
       begin
-        browser = @launch.call(number)
+        browser = begin
+          @launch.call(number)
+        ensure
+          @lock.synchronize { @launching.delete(Fiber.current) }
+        end
         closed = @lock.synchronize do
           slot.assign(browser) unless @closed
           @closed
@@ -226,20 +244,19 @@ module Crystalfaux
       slot.failed? || slot.served >= @pages_per_browser || browser.closed?
     end
 
-    # Takes the slot's browser, if any, and closes it. When the pool is
-    # closed, `#close` already owns that browser and waits for it.
+    # Takes the slot's browser, if any, and closes it. `#close` waits for
+    # that shutdown. When the pool is closed, `#close` owns the browser, so
+    # this leaves it in the slot and does not close it.
     private def retire(slot : Slot) : Nil
-      browser, tracked = @lock.synchronize do
-        taken = slot.take
-        track = !taken.nil? && !@closed
-        @busy.add if track
-        {taken, track}
+      browser = @lock.synchronize do
+        next if @closed
+        slot.take.tap { |taken| @busy.add if taken }
       end
       return unless browser
       begin
         browser.close
       ensure
-        @busy.done if tracked
+        @busy.done
       end
     end
 

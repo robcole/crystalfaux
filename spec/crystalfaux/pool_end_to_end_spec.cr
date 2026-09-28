@@ -66,7 +66,9 @@ describe Crystalfaux::Pool, tags: "browser" do
     process = browser.process.should_not be_nil
     # The call rotates the browser after its one page; its shutdown has
     # started once the browser reports closed.
+    deadline = Time.instant + 10.seconds
     until browser.closed?
+      raise "the browser was not rotated within 10 seconds" if Time.instant > deadline
       Fiber.yield
     end
 

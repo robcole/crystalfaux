@@ -20,6 +20,57 @@ class FakeLaunches
   end
 end
 
+# Wraps the browser side of a fake pipe and holds the `Browser.close`
+# frame until `#open`, so a spec can keep a browser shutdown in progress.
+class CloseGate < IO
+  @opened = Channel(Nil).new
+
+  def initialize(@io : IO)
+  end
+
+  def read(slice : Bytes) : Int32
+    @io.read(slice)
+  end
+
+  def write(slice : Bytes) : Nil
+    if String.new(slice).includes?(%("method":"Browser.close"))
+      select
+      when @opened.receive?
+      when timeout(5.seconds)
+        raise "gate never opened"
+      end
+    end
+    @io.write(slice)
+  end
+
+  def flush : Nil
+    @io.flush
+  end
+
+  def close : Nil
+    @io.close
+  end
+
+  def closed? : Bool
+    @io.closed?
+  end
+
+  # Lets the held `Browser.close` frame, and every later one, through.
+  def open : Nil
+    @opened.close
+  end
+end
+
+# Connects a `Crystalfaux::Browser` to a `ScriptedBrowser` over a pipe whose
+# `Browser.close` frame waits for the returned gate.
+def gated_scripted_browser : {Crystalfaux::Browser, ScriptedBrowser, CloseGate}
+  client, server = IO::Stapled.pipe
+  gate = CloseGate.new(client)
+  connection = Crystalfaux::Juggler::Connection.new(Crystalfaux::Juggler::Transport.new(gate))
+  fake = ScriptedBrowser.new(JugglerPeer.new(server))
+  {Crystalfaux::Browser.connect(connection), fake, gate}
+end
+
 # Polls *condition* until it holds, or raises so a regression fails instead
 # of hanging.
 def wait_until(timeout : Time::Span = 1.second, & : -> Bool) : Nil
@@ -266,6 +317,87 @@ describe Crystalfaux::Pool do
   end
 
   describe "#close" do
+    it "owns the shutdown of a browser whose call ends while close runs" do
+      gates = [] of CloseGate
+      fakes = [] of ScriptedBrowser
+      browsers = [] of Crystalfaux::Browser
+      pool = Crystalfaux::Pool.new(size: 2, pages_per_browser: 1) do
+        browser, fake, gate = gated_scripted_browser
+        gates << gate
+        fakes << fake
+        browsers << browser
+        browser
+      end
+      entered = Channel(Nil).new(2)
+      release_first = Channel(Nil).new
+      done = Channel(Nil).new(2)
+      spawn do
+        pool.with_page { entered.send(nil); release_first.receive }
+      ensure
+        done.send(nil)
+      end
+      receive_within(entered)
+      spawn do
+        pool.with_page do
+          entered.send(nil)
+          wait_until { pool.closed? }
+        end
+      ensure
+        done.send(nil)
+      end
+      receive_within(entered)
+      first, second = browsers
+      closed = Channel(Nil).new(1)
+      spawn do
+        pool.close
+        closed.send(nil)
+      end
+
+      # Close is held in the first browser's shutdown. The second call ends
+      # meanwhile and leaves its browser to close.
+      receive_within(done)
+      second.connection.closed?.should be_false
+      gates[0].open
+      quiet?(closed, 100.milliseconds).should be_true
+
+      gates[1].open
+      receive_within(closed)
+      first.connection.closed?.should be_true
+      second.connection.closed?.should be_true
+      release_first.send(nil)
+      receive_within(done)
+    ensure
+      gates.try &.each(&.open)
+      pool.try &.close
+      fakes.try &.each(&.close)
+    end
+
+    it "raises PoolError when the launch block closes its own pool, and keeps the pool open" do
+      launches = FakeLaunches.new
+      pools = [] of Crystalfaux::Pool
+      pool = Crystalfaux::Pool.new(size: 1, pages_per_browser: 5) do |number|
+        expect_raises(Crystalfaux::PoolError, /launch block/) { pools.first.close }
+        launches.launch(number)
+      end
+      pools << pool
+      outcome = Channel(Exception?).new(1)
+      spawn do
+        pool.with_page { }
+        outcome.send(nil)
+      rescue ex
+        outcome.send(ex)
+      end
+
+      receive_within(outcome).should be_nil
+      pool.closed?.should be_false
+      pool.close
+      launches.browsers.first.closed?.should be_true
+    ensure
+      # No `pool.close` here: after a regression the launch still waits in
+      # its own close, and this close would wait for it forever.
+      launches.try &.close
+    end
+
     it "waits for a launch in progress, then closes the browser it returns" do
       launches = FakeLaunches.new
       started = Channel(Nil).new(1)
