@@ -24,7 +24,9 @@ module Crystalfaux
     @command : Command?
     @version : String?
     @allow_unsupported = false
-    @help = false
+    # The help of the command being parsed, captured when `--help` is seen.
+    # `OptionParser` restores the root banner and flags after `parse`.
+    @help : String?
 
     def initialize(@stdout : IO = STDOUT, @stderr : IO = STDERR, @client : Fetch::Client = Fetch::Client.new)
       @dir = Launcher::Discovery.cache_dir
@@ -40,7 +42,10 @@ module Crystalfaux
         @stderr.puts "crystalfaux: #{error.message}", parser
         return 2
       end
-      return help(parser) if @help
+      if help = @help
+        @stdout.puts help
+        return 0
+      end
 
       case @command
       in Command::Fetch then fetch
@@ -72,11 +77,6 @@ module Crystalfaux
       0
     end
 
-    private def help(parser : OptionParser) : Int32
-      @stdout.puts parser
-      0
-    end
-
     private def option_parser : OptionParser
       OptionParser.new do |parser|
         parser.banner = "Usage: crystalfaux <fetch|list> [options]"
@@ -92,7 +92,7 @@ module Crystalfaux
           parser.banner = "Usage: crystalfaux list [--dir <path>]"
           dir_option(parser)
         end
-        parser.on("-h", "--help", "Show this help") { @help = true }
+        parser.on("-h", "--help", "Show this help") { @help = parser.to_s }
         parser.unknown_args do |before, after|
           extra = before + after
           raise UsageError.new("unexpected argument: #{extra.first}") unless extra.empty?

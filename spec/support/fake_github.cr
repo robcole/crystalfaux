@@ -12,7 +12,9 @@ require "http/server"
 # end
 # ```
 class FakeGitHub
-  private record Route, status : Int32, body : Bytes, headers : HTTP::Headers
+  # *sent* is the number of body bytes to write before the connection
+  # drops; `nil` writes the whole body.
+  private record Route, status : Int32, body : Bytes, headers : HTTP::Headers, sent : Int32? = nil
 
   # The request lines received so far, for example `"GET /x"`.
   getter requests = [] of String
@@ -41,6 +43,12 @@ class FakeGitHub
     @routes[path] = Route.new(status, body.to_slice, HTTP::Headers.new)
   end
 
+  # Serves *body* with its full `Content-Length`, but closes the connection
+  # after *sent* bytes.
+  def truncate(path : String, body : Bytes, sent : Int32) : Nil
+    @routes[path] = Route.new(200, body, HTTP::Headers.new, sent)
+  end
+
   def redirect(path : String, to location : String) : Nil
     @routes[path] = Route.new(302, Bytes.empty, HTTP::Headers{"Location" => location})
   end
@@ -57,7 +65,14 @@ class FakeGitHub
     context.response.status_code = route.status
     context.response.headers.merge!(route.headers)
     context.response.content_length = route.body.size
-    context.response.write(route.body)
+    if sent = route.sent
+      context.response.upgrade do |io|
+        io.write(route.body[0, sent])
+        io.close
+      end
+    else
+      context.response.write(route.body)
+    end
   end
 end
 

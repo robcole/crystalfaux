@@ -43,8 +43,8 @@ module Crystalfaux::Fetch
 
     # Writes the body of *url* to *io*, following redirects. Yields the bytes
     # received so far and the total from `Content-Length`, if the server
-    # sends one, after each chunk. Raises `FetchError` on an error status or
-    # a network failure.
+    # sends one, after each chunk. Raises `FetchError` on an error status, a
+    # network failure, or a body shorter than its `Content-Length`.
     def download(url : String, io : IO, & : Int64, Int64? ->) : Nil
       get(URI.parse(url)) do |response|
         total = response.headers["Content-Length"]?.try(&.to_i64?)
@@ -54,6 +54,10 @@ module Crystalfaux::Fetch
           io.write(buffer[0, count])
           received += count
           yield received, total
+        end
+        # A fixed-length body ends quietly when the connection drops early.
+        if total && received < total
+          raise FetchError.new("Download of #{url} ended after #{received} of #{total} bytes")
         end
       end
     end

@@ -22,9 +22,10 @@ module Crystalfaux::Fetch
     getter dir : Path
 
     # *progress* receives a progress line while the archive downloads; `nil`
-    # prints nothing.
+    # prints nothing. *dir* is expanded to an absolute, normalized path, so
+    # the containment check on archive entries compares like with like.
     def initialize(dir : Path | String, @client : Client = Client.new, @progress : IO? = nil)
-      @dir = Path[dir]
+      @dir = Path[dir].expand
     end
 
     # Returns the install directory of *build* in `dir`.
@@ -109,10 +110,12 @@ module Crystalfaux::Fetch
       Compress::Zip::File.open(archive) do |zip|
         zip.entries.each { |entry| extract_entry(entry, staging) }
       end
-    rescue error : Compress::Zip::Error
+    rescue error : Compress::Zip::Error | Compress::Deflate::Error
       raise FetchError.new("Cannot extract #{archive}: #{error.message}")
     end
 
+    # *staging* is absolute and normalized (see `#initialize`), so a
+    # normalized entry path that does not start with it leaves the install.
     private def extract_entry(entry : Compress::Zip::File::Entry, staging : Path) : Nil
       path = (staging / entry.filename).normalize
       unless path.parts[0, staging.parts.size] == staging.parts && path.parts.size > staging.parts.size

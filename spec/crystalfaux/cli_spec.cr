@@ -80,9 +80,44 @@ describe Crystalfaux::CLI do
         end
       end
     end
+
+    it "installs into a relative --dir with dot components" do
+      with_fake_github do |github|
+        with_dir do |dir|
+          serve_releases(github, ["beta.31"])
+          relative = "./#{Path[dir].relative_to(Dir.current)}/sub/../cache"
+
+          run = run_cli(github, ["fetch", "--dir", relative])
+
+          run.status.should eq(0)
+          installed = Dir.children(Path[dir] / "cache")
+          run.stdout.should eq("#{Path[dir] / "cache" / installed.first}\n")
+        end
+      end
+    end
+
+    it "prints the fetch options with --help" do
+      with_fake_github do |github|
+        run = run_cli(github, ["fetch", "--help"])
+        run.status.should eq(0)
+        run.stdout.should contain("Usage: crystalfaux fetch")
+        run.stdout.should contain("--version")
+        run.stdout.should contain("--allow-unsupported")
+        run.stdout.should contain("--dir")
+      end
+    end
   end
 
   describe "list" do
+    it "prints the list options with --help" do
+      with_fake_github do |github|
+        run = run_cli(github, ["list", "--help"])
+        run.status.should eq(0)
+        run.stdout.should contain("Usage: crystalfaux list")
+        run.stdout.should contain("--dir")
+      end
+    end
+
     it "lists the builds for this platform with their status" do
       with_fake_github do |github|
         with_dir do |dir|
