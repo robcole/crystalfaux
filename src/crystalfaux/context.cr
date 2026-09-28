@@ -22,6 +22,9 @@ module Crystalfaux
     @lock = Sync::Mutex.new
     @blocked_types = Set(ResourceType).new
     @blocked_urls = [] of Regex
+    # Held while `Browser.setRequestInterception` is in flight, so that a
+    # concurrent `#block` returns only after the browser confirmed it.
+    @interception_lock = Sync::Mutex.new
     @intercepting = false
 
     # :nodoc:
@@ -94,8 +97,10 @@ module Crystalfaux
     # matches any characters and `*` any characters except `/`. Rules add
     # up over calls.
     #
-    # The first call turns on request interception for the context
-    # (`Browser.setRequestInterception`). Blocked requests fail with the
+    # Turns on request interception for the context
+    # (`Browser.setRequestInterception`) unless the browser already
+    # confirmed it. When that fails, the error is raised and the rules stay;
+    # they apply after a later call succeeds. Blocked requests fail with the
     # `blockedbyclient` error before `Page#on_request` handlers see them.
     #
     # ```
@@ -104,17 +109,14 @@ module Crystalfaux
     def block(*, types : Enumerable(ResourceType) = [] of ResourceType, urls : Enumerable(U) = [] of String,
               timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil forall U
       patterns = urls.map { |url| url_pattern(url) }
-      started = @lock.synchronize do
+      @lock.synchronize do
         @blocked_types.concat(types)
         @blocked_urls.concat(patterns)
-        @intercepting.tap { @intercepting = true }
       end
-      return if started
-      begin
+      @interception_lock.synchronize do
+        return if @intercepting
         Protocol.call(@browser.connection, Protocol::Browser::SetRequestInterception.new(true, @id), timeout: timeout)
-      rescue ex
-        @lock.synchronize { @intercepting = false }
-        raise ex
+        @intercepting = true
       end
     end
 

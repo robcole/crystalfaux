@@ -35,8 +35,9 @@ module Crystalfaux
   #   later calls raise `PageCrashed`. `#close` still works.
   # - The page's `Traffic` follows its network events and runs
   #   `#on_request` and `#on_response` handlers in fibers of their own.
-  #   Closing the page, or a crash, fails `Response#body` waits with the
-  #   reason.
+  #   Closing the page, or a crash, drops the handlers and fails
+  #   `Response#body` waits with the reason. A handler that is running
+  #   then is not stopped, but its request decisions raise the reason.
   class Page
     # The name of the isolated world whose execution contexts are tracked as
     # a frame's `utility_context_id`, as in Playwright
@@ -92,6 +93,10 @@ module Crystalfaux
     @keyboard : Keyboard?
     @mouse : Mouse?
     @traffic = Traffic.new
+    # Held while `Network.setRequestInterception` is in flight, so that a
+    # concurrent `#on_request` returns only after the browser confirmed it.
+    @interception_lock = Sync::Mutex.new
+    @intercepting = false
 
     # :nodoc:
     #
@@ -218,8 +223,9 @@ module Crystalfaux
     end
 
     # Calls *handler* with each request of the page that the browser
-    # intercepted, and turns on interception for the page with the first
-    # handler.
+    # intercepted, and turns on interception for the page unless the
+    # browser already confirmed it. When that fails, the handler is not
+    # added and the error is raised; a later call tries again.
     #
     # The handler decides the request with `Request#abort`,
     # `Request#continue` or `Request#fulfill`. Handlers run in the order
@@ -237,8 +243,15 @@ module Crystalfaux
     # end
     # ```
     def on_request(timeout : Time::Span = Browser::DEFAULT_TIMEOUT, &handler : Request ->) : Nil
-      return unless @traffic.add_request_handler(handler)
-      call(Protocol::Network::SetRequestInterception.new(true), Time.instant + timeout)
+      # Added first, so a request intercepted as soon as interception is on
+      # already sees the handler.
+      @traffic.add_request_handler(handler)
+      begin
+        enable_interception(timeout)
+      rescue ex
+        @traffic.remove_request_handler(handler)
+        raise ex
+      end
     end
 
     # Calls *handler* with each response the page receives, in a fiber per
@@ -302,6 +315,14 @@ module Crystalfaux
       with_waiter do |waiter|
         return if @lock.synchronize { @ready }
         waiter.wait(deadline, "Opening page #{@target_id}", &.is_a?(Protocol::Page::Ready))
+      end
+    end
+
+    private def enable_interception(timeout : Time::Span) : Nil
+      @interception_lock.synchronize do
+        return if @intercepting
+        call(Protocol::Network::SetRequestInterception.new(true), Time.instant + timeout)
+        @intercepting = true
       end
     end
 

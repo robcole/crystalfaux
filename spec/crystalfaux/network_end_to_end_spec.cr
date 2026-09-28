@@ -1,10 +1,11 @@
 require "../spec_helper"
 require "http/server"
 
-# Serves a page with an image, and records each request path with its
-# `X-Crystalfaux` header.
+# Serves a page with an image, records each request path with its
+# `X-Crystalfaux` header, and records the bodies posted to `/submit`.
 private class SiteServer
   getter base_url : String
+  getter posts = Channel(String).new(8)
   @hits = Channel({String, String?}).new(64)
 
   def initialize
@@ -17,6 +18,8 @@ private class SiteServer
       when "/pixel.png"
         context.response.content_type = "image/png"
         context.response.print "not really a png"
+      when "/submit"
+        @posts.send(context.request.body.try(&.gets_to_end) || "")
       else
         context.response.status = :not_found
       end
@@ -46,7 +49,7 @@ private class SiteServer
 end
 
 describe "network", tags: "browser" do
-  it "blocks, fulfills, reads bodies, adds headers and keeps cookies against a real Camoufox" do
+  it "blocks, fulfills, rewrites POST bodies, reads bodies, adds headers and keeps cookies against a real Camoufox" do
     options = Crystalfaux::Launcher::Options.new(executable: camoufox_binary, headless: true)
     site = SiteServer.new
     browser = Crystalfaux::Browser.launch(options)
@@ -54,8 +57,14 @@ describe "network", tags: "browser" do
     page = context.new_page
     context.block(types: [Crystalfaux::ResourceType::Image])
     context.extra_headers = HTTP::Headers{"X-Crystalfaux" => "yes"}
+    sent_bodies = Channel(Bytes?).new(1)
     page.on_request do |request|
-      request.fulfill(body: "<title>routed</title>", content_type: "text/html") if request.url.ends_with?("/routed")
+      if request.url.ends_with?("/routed")
+        request.fulfill(body: "<title>routed</title>", content_type: "text/html")
+      elsif request.url.ends_with?("/submit")
+        sent_bodies.send(request.post_data)
+        request.continue(post_data: "YWJj é")
+      end
     end
     bodies = Channel({String, String}).new(8)
     page.on_response { |response| bodies.send({response.url, response.text}) }
@@ -71,6 +80,11 @@ describe "network", tags: "browser" do
 
     page.title.should eq("routed")
     site.hits.should be_empty
+
+    page.evaluate("fetch('/submit', {method: 'POST', body: 'original é'}), 0")
+
+    receive_within(sent_bodies, 5.seconds).should eq("original é".to_slice)
+    receive_within(site.posts, 5.seconds).should eq("YWJj é")
 
     context.set_cookies([Crystalfaux::CookieOptions.new("flavour", "oat", url: "#{site.base_url}/")])
     context.cookies.map { |cookie| {cookie.name, cookie.value, cookie.domain} }.should eq([{"flavour", "oat", "127.0.0.1"}])

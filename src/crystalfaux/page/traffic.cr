@@ -16,11 +16,14 @@ module Crystalfaux
     # response, it spawns one fiber that runs the response handlers in
     # order. These fibers end when the handlers return; a request action
     # that fails because the page closed ends them too. Handlers that
-    # raise are logged.
+    # raise are logged. The traffic cannot stop a handler that blocks on
+    # something else, such as its own channel or IO.
     #
-    # `#dispose` fails the body wait of every unfinished response. Events
-    # that arrive after that are not delivered: the page removed its
-    # subscriptions.
+    # The page calls `#dispose` when it closes or crashes. It drops the
+    # handlers and the registry, and fails the body wait of every
+    # unfinished response. A closed page has removed its subscriptions; a
+    # crashed page keeps them until it closes, and the traffic ignores the
+    # events that still arrive.
     class Traffic
       Log = ::Log.for("crystalfaux.network")
 
@@ -33,12 +36,12 @@ module Crystalfaux
       @response_handlers = [] of Response ->
       @failure : Exception?
 
-      # Adds a request handler and returns whether it is the first.
-      def add_request_handler(handler : Request ->) : Bool
-        @lock.synchronize do
-          @request_handlers << handler
-          @request_handlers.size == 1
-        end
+      def add_request_handler(handler : Request ->) : Nil
+        @lock.synchronize { @request_handlers << handler }
+      end
+
+      def remove_request_handler(handler : Request ->) : Nil
+        @lock.synchronize { @request_handlers.delete(handler) }
       end
 
       def add_response_handler(handler : Response ->) : Nil
@@ -82,6 +85,8 @@ module Crystalfaux
           return if @failure
           @failure = reason
           @requests.clear
+          @request_handlers.clear
+          @response_handlers.clear
           @responses.values.tap { @responses.clear }
         end
         responses.each(&.finish(reason))

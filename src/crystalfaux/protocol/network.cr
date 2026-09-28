@@ -96,6 +96,7 @@ module Crystalfaux::Protocol
       field url : String?
       field method : String?
       field headers : Array(HTTPHeader)?
+      # Base64-encoded.
       field post_data : String?
 
       def initialize(@request_id : String, *, @url : String? = nil, @method : String? = nil,
@@ -149,6 +150,7 @@ module Crystalfaux::Protocol
       field request_id : String
       # The request id of the request this one redirects from.
       field redirected_from : String?
+      # Base64-encoded.
       field post_data : String?
       field headers : Array(HTTPHeader)
       field is_intercepted : Bool

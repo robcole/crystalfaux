@@ -1,8 +1,9 @@
 require "../spec_helper"
 
 private def request_event(request_id : String, url : String, *, intercepted : Bool = true,
-                          cause : String = "TYPE_DOCUMENT", method : String = "GET")
+                          cause : String = "TYPE_DOCUMENT", method : String = "GET", post_data : String? = nil)
   {
+    postData:      post_data,
     frameId:       ProbeScript::FRAME_ID,
     requestId:     request_id,
     headers:       [{name: "Accept", value: "*/*"}],
@@ -39,6 +40,21 @@ private def params_of(request : JSON::Any) : JSON::Any
   request["params"]
 end
 
+# Ends the page of *fake* one way, as the browser or the caller would.
+private def tear_down(how : String, page : Crystalfaux::Page, fake : ScriptedBrowser) : Nil
+  case how
+  when "closes"  then page.close
+  when "crashes" then fake.event("Page.crashed", nil)
+  else                fake.close
+  end
+end
+
+private TEARDOWNS = {
+  "closes"      => Crystalfaux::PageClosed,
+  "crashes"     => Crystalfaux::PageCrashed,
+  "disconnects" => Crystalfaux::ConnectionClosed,
+}
+
 describe "network" do
   describe "Page#on_request" do
     it "enables interception for the page and passes each intercepted request to the handler" do
@@ -68,6 +84,87 @@ describe "network" do
       browser.try &.close
       fake.try &.close
     end
+
+    it "decodes the POST data of a request and encodes a replacement" do
+      bodies = Channel(Bytes?).new(3)
+      browser, fake, _ = intercepting_page do |request|
+        bodies.send(request.post_data)
+        request.continue(post_data: "YWJj") if request.id == "r1"
+      end
+      binary = Bytes[0xc3, 0xa9, 0x00, 0xff]
+
+      fake.event("Network.requestWillBeSent", request_event("r1", "http://example.test/", method: "POST",
+        post_data: Base64.strict_encode(binary)))
+      fake.event("Network.requestWillBeSent", request_event("r2", "http://example.test/", method: "POST", post_data: ""))
+      fake.event("Network.requestWillBeSent", request_event("r3", "http://example.test/"))
+
+      receive_within(bodies).should eq(binary)
+      params_of(fake.request("Network.resumeInterceptedRequest")).should eq(
+        JSON.parse(%({"requestId":"r1","postData":"#{Base64.strict_encode("YWJj")}"})))
+      receive_within(bodies).should eq(Bytes.empty)
+      receive_within(bodies).should be_nil
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "retries turning on interception after the first attempt failed" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      attempts = 0
+      fake.on("Network.setRequestInterception") do
+        attempts += 1
+        next [json_frame({id: 0, result: {} of String => String})] if attempts > 1
+        [json_frame({id: 0, error: {message: "not now", data: ""}})]
+      end
+      seen = Channel(String).new(2)
+
+      expect_raises(Crystalfaux::ProtocolError, /not now/) { page.on_request { |request| seen.send("first #{request.id}") } }
+      page.on_request do |request|
+        seen.send("second #{request.id}")
+        request.abort
+      end
+      fake.event("Network.requestWillBeSent", request_event("r1", "http://example.test/"))
+
+      receive_within(seen).should eq("second r1")
+      fake.request("Network.abortInterceptedRequest")
+      fake.methods.count("Network.setRequestInterception").should eq(2)
+      quiet?(seen).should be_true
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    {% for how, error in TEARDOWNS %}
+      it "fails the decision of a paused handler with #{{{ error }}} when the page {{ how.id }}" do
+        release = Channel(Nil).new
+        outcome = Channel(Exception?).new(1)
+        browser, fake, page = intercepting_page do |request|
+          release.receive
+          begin
+            request.abort
+            outcome.send(nil)
+          rescue ex
+            outcome.send(ex)
+            raise ex
+          end
+        end
+        fake.event("Network.requestWillBeSent", request_event("r1", "http://example.test/"))
+        page.wait_for_events_for_spec
+
+        tear_down({{ how }}, page, fake)
+        page.wait_for_events_for_spec rescue Crystalfaux::ConnectionClosed
+        release.send(nil)
+
+        receive_within(outcome).should be_a({{ error }})
+        sleep 20.milliseconds # let the page's own fallback decision run, if any
+        fake.methods.should_not contain("Network.abortInterceptedRequest")
+        fake.methods.should_not contain("Network.resumeInterceptedRequest")
+      ensure
+        browser.try &.close
+        fake.try &.close
+      end
+    {% end %}
 
     it "fulfills a request with a status, headers and a base64 body" do
       browser, fake, _ = intercepting_page do |request|
@@ -214,23 +311,25 @@ describe "network" do
       fake.try &.close
     end
 
-    it "fails a body wait with PageClosed when the page closes" do
-      browser, fake = scripted_browser
-      page = browser.new_context.new_page
-      responses = Channel(Crystalfaux::Response).new(1)
-      page.on_response { |response| responses.send(response) }
-      fake.event("Network.requestWillBeSent", request_event("r1", "http://example.test/a", intercepted: false))
-      fake.event("Network.responseReceived", response_event("r1"))
-      response = receive_within(responses)
-      body = async { response.body(timeout: 5.seconds); JSON::Any.new(nil) }
+    {% for how, error in TEARDOWNS %}
+      it "fails a body wait with #{{{ error }}} when the page {{ how.id }}" do
+        browser, fake = scripted_browser
+        page = browser.new_context.new_page
+        responses = Channel(Crystalfaux::Response).new(1)
+        page.on_response { |response| responses.send(response) }
+        fake.event("Network.requestWillBeSent", request_event("r1", "http://example.test/a", intercepted: false))
+        fake.event("Network.responseReceived", response_event("r1"))
+        response = receive_within(responses)
+        body = async { response.body(timeout: 5.seconds); JSON::Any.new(nil) }
 
-      page.close
+        tear_down({{ how }}, page, fake)
 
-      receive_within(body).should be_a(Crystalfaux::PageClosed)
-    ensure
-      browser.try &.close
-      fake.try &.close
-    end
+        receive_within(body).should be_a({{ error }})
+      ensure
+        browser.try &.close
+        fake.try &.close
+      end
+    {% end %}
 
     it "raises TimeoutError when the request does not finish in time" do
       browser, fake = scripted_browser
