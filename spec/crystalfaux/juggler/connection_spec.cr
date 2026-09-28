@@ -175,6 +175,56 @@ describe Crystalfaux::Juggler::Connection do
       connection.try &.close
       peer.try &.close
     end
+    it "closes the connection by the original deadline when cancelled during a blocked write" do
+      connection, peer = connected_pair
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      # Far larger than a pipe buffer, so the write blocks once the peer
+      # stops reading.
+      blocked = async do
+        connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, "s1", 150.milliseconds, cancellation)
+      end
+      peer.io.read_byte.should eq('{'.ord) # the writer has started the frame
+      queued = async { connection.call("Browser.getInfo", timeout: 5.seconds) }
+
+      cancellation.cancel(Crystalfaux::PageCrashed.new("crashed"))
+
+      receive_within(blocked, 50.milliseconds).should be_a(Crystalfaux::PageCrashed)
+      connection.closed?.should be_false
+      receive_within(queued).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "writes nothing and stays usable when cancelled before the hand-off" do
+      connection, peer = connected_pair
+      # Occupies the writer until the peer reads it, so the next call waits
+      # to hand off its request.
+      first = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, "s1", 5.seconds) }
+      Fiber.yield
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      waiting = async { connection.call("Page.close", nil, "s1", 5.seconds, cancellation) }
+      Fiber.yield
+
+      cancellation.cancel(Crystalfaux::PageClosed.new("closed"))
+
+      receive_within(waiting).should be_a(Crystalfaux::PageClosed)
+      evaluate = peer.request
+      evaluate["method"].should eq("Runtime.evaluate")
+      peer.reply(evaluate["id"], {result: {value: 1}}, "s1")
+      receive_within(first).should eq(JSON.parse(%({"result":{"value":1}})))
+      later = async { connection.call("Browser.getInfo") }
+      # The cancelled Page.close was never written: the next frame is this one.
+      info = peer.request
+      info["method"].should eq("Browser.getInfo")
+      peer.reply(info["id"], {version: "v"})
+      receive_within(later).should eq(JSON.parse(%({"version":"v"})))
+      connection.closed?.should be_false
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
   end
 
   describe "#off_close" do

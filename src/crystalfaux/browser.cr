@@ -26,7 +26,9 @@ module Crystalfaux
   # connection's reader fiber, and create and close `Page` objects there.
   # When a page attaches for a `Context#new_page` call that already gave up,
   # the handler spawns one fiber that closes the target, bounded by
-  # `CLEANUP_TIMEOUT`.
+  # `CLEANUP_TIMEOUT`. The fiber sends through the browser-owned connection
+  # and also stops when that connection closes; `#close` does not wait for
+  # it.
   class Browser
     DEFAULT_TIMEOUT = 30.seconds
 

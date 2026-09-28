@@ -35,9 +35,10 @@ module Crystalfaux
     # On failure after the target exists, the page is forgotten and its
     # target closed (bounded by `Browser::CLEANUP_TIMEOUT`), and the
     # original error is raised. A target that attaches after the call gave
-    # up is closed too. Only when the `Browser.newPage` reply itself never
-    # arrives is the target unknown; a page that then attaches stays in the
-    # context until `#close`.
+    # up is closed too. The target is unknown only when the call failed
+    # before it got the `Browser.newPage` reply: the reply never arrived, or
+    # arrived after *timeout* and was dropped. A page that then attaches
+    # stays in the context until `#close`.
     def new_page(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Page
       deadline = Time.instant + timeout
       # Registered before the request, so a page that attaches, or even

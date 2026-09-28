@@ -12,8 +12,10 @@ module Crystalfaux::Juggler
   # ```
   #
   # A cancelled call releases its pending entry; its reply is dropped when
-  # it arrives. The connection stays open for other calls. A call made after
-  # the cancellation raises at once.
+  # it arrives. The connection stays open for other calls, unless the
+  # cancelled call's frame is still not fully written at its original
+  # deadline (see `Connection#call`). A call made after the cancellation
+  # raises at once.
   class Cancellation
     # Closed by `#cancel`, which wakes every call that selects on it.
     getter signal = Channel(Nil).new

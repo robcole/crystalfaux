@@ -27,6 +27,13 @@ module Crystalfaux::Juggler
   # connection disconnects: pending calls raise `ConnectionClosed` and the
   # transport is closed. Frames that arrive after that are not read.
   #
+  # A call cancelled through its `Cancellation` after the writer took its
+  # frame, but before the frame is fully written, starts one write-deadline
+  # fiber. It ends when the writer finishes the frame, or at the call's
+  # original deadline, when it closes the connection unless the frame is
+  # written by then, as a timeout of the call would. A stuck partial frame
+  # therefore cannot stall later requests.
+  #
   # The connection owns the transport: `#close` closes it.
   class Connection
     DEFAULT_TIMEOUT = 30.seconds
@@ -60,7 +67,9 @@ module Crystalfaux::Juggler
     # that arrives after the timeout is dropped.
     #
     # When *cancellation* is cancelled before the reply arrives, raises its
-    # reason and drops the reply; the connection stays open.
+    # reason at once and drops the reply; the connection stays open. If the
+    # request frame is then still being written, it keeps its deadline: the
+    # connection closes when the frame is not fully written within *timeout*.
     #
     # The timeout also covers waiting for the writer and the write itself.
     # When it expires before the request frame is fully written, the
@@ -236,11 +245,25 @@ module Crystalfaux::Juggler
       when message = reply.receive?
         message || raise ConnectionClosed.new("Juggler connection closed while waiting for #{method}")
       when signal_of(cancellation).receive?
-        # The writer finishes the frame if it has not yet; the reply is dropped.
+        # The reply is dropped. A frame still being written keeps its deadline.
+        enforce_write_deadline(request, deadline) unless request.written?
         raise cancelled(cancellation)
       when timeout(remaining(deadline))
         close unless request.written?
         raise timed_out(method, timeout)
+      end
+    end
+
+    # Closes the connection at *deadline* unless the writer has finished
+    # *request* by then, for a caller that stopped waiting. The fiber ends at
+    # whichever comes first.
+    private def enforce_write_deadline(request : Outgoing, deadline : Time::Instant) : Nil
+      spawn(name: "juggler-write-deadline") do
+        select
+        when request.finished.receive?
+        when timeout(remaining(deadline))
+          close unless request.written?
+        end
       end
     end
 
