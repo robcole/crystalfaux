@@ -74,6 +74,20 @@ class ScriptedBrowser
   end
 end
 
+class Crystalfaux::Page
+  # Returns once every event the fake browser sent before this call has been
+  # handled: the reader handles frames in order, so a reply comes after them.
+  # Works on a closed page too; it bypasses the page's own checks.
+  def wait_for_events_for_spec : Nil
+    @connection.call("Spec.sync", nil, @session_id)
+  end
+end
+
+# Returns a frame that JSON-encodes *message*.
+def json_frame(message) : JSON::Any
+  JSON.parse(message.to_json)
+end
+
 # Connects a `Crystalfaux::Browser` to a `ScriptedBrowser` that replays the
 # recorded probe.
 def scripted_browser : {Crystalfaux::Browser, ScriptedBrowser}

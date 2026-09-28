@@ -15,20 +15,31 @@ module Crystalfaux
   #   `Juggler::Connection`. `#close` sends `Browser.close`, closes the pipe,
   #   then signals the process and removes the temporary profile, through
   #   `Launcher::BrowserProcess#close`.
-  # - The browser keeps the registry of contexts and pages. Closing the
-  #   browser, or losing the pipe, closes every context and page and fails
-  #   every waiting call with `ConnectionClosed`. After the pipe is lost,
-  #   call `#close` to stop the process.
+  # - The browser keeps the registry of contexts, pages, and page creations
+  #   in progress (`PageCreation`). Closing the browser, or losing the pipe,
+  #   closes every context and page, fails every waiting call with
+  #   `ConnectionClosed`, and removes the browser's own event subscriptions.
+  #   After the pipe is lost, call `#close` to stop the process.
   #
-  # Fibers: the browser starts none. Its handlers for
+  # Fibers: the browser keeps none running. Its handlers for
   # `Browser.attachedToTarget` and `Browser.detachedFromTarget` run on the
   # connection's reader fiber, and create and close `Page` objects there.
+  # When a page attaches for a `Context#new_page` call that already gave up,
+  # the handler spawns one fiber that closes the target, bounded by
+  # `CLEANUP_TIMEOUT`.
   class Browser
     DEFAULT_TIMEOUT = 30.seconds
+
+    # What `#register` returns for a page whose creation gave up.
+    private record Abandoned
 
     # How long `#close` waits for `Browser.close` to be written when there is
     # no process to stop.
     CLOSE_GRACE = 5.seconds
+
+    # How long closing an unwanted page target may take, after
+    # `Context#new_page` failed.
+    CLEANUP_TIMEOUT = 5.seconds
 
     # The browser version, for example `"Firefox/152.0.4-beta.31"`.
     getter version : String = ""
@@ -45,10 +56,18 @@ module Crystalfaux
 
     @lock = Sync::Mutex.new
     @contexts = {} of String => Context
-    # Pages by target id.
+    # Open pages by target id.
     @pages = {} of String => Page
-    # `#wait_for_page` calls by target id.
-    @page_waiters = {} of String => Channel(Page | Exception)
+    # `Context#new_page` calls in progress.
+    @creations = [] of PageCreation
+    # Pages that attached while a creation in their context had no target id
+    # yet, by target id. A creation claims its page here; a page stays here
+    # after it detaches, so the creation learns that it closed.
+    @unclaimed = {} of String => Page
+    # Target ids whose creation gave up before they attached.
+    @abandoned = Set(String).new
+    @subscriptions = [] of Juggler::Subscription
+    @close_handler : (->)?
     @closed = false
     @shut_down = false
 
@@ -57,7 +76,7 @@ module Crystalfaux
     #
     # Raises `LaunchError` when no executable is found or the browser does
     # not start, `UnsupportedBrowserError` when its version is not
-    # supported, and what `.connect` raises. On failure, the process is
+    # supported, and what the handshake raises. On failure, the process is
     # stopped and its temporary profile removed.
     def self.launch(options : Launcher::Options = Launcher::Options.new,
                     timeout : Time::Span = DEFAULT_TIMEOUT) : self
@@ -77,28 +96,36 @@ module Crystalfaux
       end
     end
 
+    # :nodoc:
+    #
     # Drives the browser at the other end of *connection*: subscribes to
     # page targets, then sends `Browser.enable` (without the default
     # context) and `Browser.getInfo`, as Playwright's
-    # `server/firefox/ffBrowser.ts` does.
+    # `server/firefox/ffBrowser.ts` does. `.launch` and the specs use it.
     #
     # The browser owns *connection* and *process* from then on. When the
-    # handshake raises, the caller still owns them.
+    # handshake raises, it removes its handlers from *connection*, and the
+    # caller still owns both.
     def self.connect(connection : Juggler::Connection, process : Launcher::BrowserProcess? = nil,
                      timeout : Time::Span = DEFAULT_TIMEOUT) : self
       browser = new(connection, process)
-      browser.handshake(timeout)
+      begin
+        browser.handshake(timeout)
+      rescue ex
+        browser.unsubscribe
+        raise ex
+      end
       browser
     end
 
     private def initialize(@connection : Juggler::Connection, @process : Launcher::BrowserProcess?)
-      @connection.on(Protocol::Browser::AttachedToTarget::METHOD) do |params|
+      @subscriptions << @connection.on(Protocol::Browser::AttachedToTarget::METHOD) do |params|
         attached(Protocol.decode(Protocol::Browser::AttachedToTarget, params))
       end
-      @connection.on(Protocol::Browser::DetachedFromTarget::METHOD) do |params|
+      @subscriptions << @connection.on(Protocol::Browser::DetachedFromTarget::METHOD) do |params|
         detached(Protocol.decode(Protocol::Browser::DetachedFromTarget, params))
       end
-      @connection.on_close { release_all(ConnectionClosed.new("Juggler connection closed")) }
+      @close_handler = @connection.on_close { release_all(ConnectionClosed.new("Juggler connection closed")) }
     end
 
     # Creates an isolated context. The browser removes it when the pipe
@@ -154,23 +181,62 @@ module Crystalfaux
       @user_agent = info.user_agent
     end
 
-    # Returns the page of *target_id* once `Browser.attachedToTarget` has
-    # registered it.
-    protected def wait_for_page(target_id : String, deadline : Time::Instant) : Page
-      waiter = @lock.synchronize do
+    # Removes the browser's event and close handlers from the connection.
+    protected def unsubscribe : Nil
+      subscriptions = @lock.synchronize { @subscriptions.dup.tap { @subscriptions.clear } }
+      subscriptions.each { |subscription| @connection.off(subscription) }
+      @close_handler.try { |handler| @connection.off_close(handler) }
+    end
+
+    # Registers a page creation in *context*. Call it before sending
+    # `Browser.newPage`, and `#finish_creation` when done.
+    protected def begin_creation(context : Context) : PageCreation
+      creation = PageCreation.new(context)
+      @lock.synchronize do
         raise ConnectionClosed.new("Browser is closed") if @closed
-        page = @pages[target_id]?
-        return page if page
-        @page_waiters[target_id] = Channel(Page | Exception).new(1)
+        raise PageClosed.new("Context #{context.id} is closed") if context.closed?
+        @creations << creation
       end
-      select
-      when outcome = waiter.receive
-        raise outcome if outcome.is_a?(Exception)
-        outcome
-      when timeout({deadline - Time.instant, Time::Span.zero}.max)
-        @lock.synchronize { @page_waiters.delete(target_id) }
-        raise TimeoutError.new("Page #{target_id} was not attached in time")
+      creation
+    end
+
+    # Returns the page of *target_id*, the target that `Browser.newPage`
+    # created for *creation*, once it has attached. The page may already be
+    # closed when it detached before this call.
+    protected def claim_page(creation : PageCreation, target_id : String, deadline : Time::Instant) : Page
+      page = @lock.synchronize do
+        creation.target_id = target_id
+        @unclaimed.delete(target_id)
       end
+      page || creation.wait(deadline)
+    end
+
+    # Ends *creation*. On failure, closes the page it got, if any, or
+    # remembers its target so a late attach is closed. When no other
+    # creation is pending in the context, closes the pages that attached
+    # for creations that never learned their target id.
+    protected def finish_creation(creation : PageCreation, page : Page?, succeeded : Bool) : Nil
+      unwanted = @lock.synchronize do
+        @creations.delete(creation)
+        failed = [] of Page
+        unless succeeded
+          target_id = creation.target_id
+          # The page may have attached after the wait for it timed out.
+          page ||= target_id.try { |id| @pages[id]? }
+          if page
+            failed << page
+          elsif target_id
+            @abandoned << target_id
+          end
+        end
+        discarded = (failed + orphans_of(creation.context)).uniq
+        discarded.each do |orphan|
+          @pages.delete(orphan.target_id)
+          @unclaimed.delete(orphan.target_id)
+        end
+        discarded
+      end
+      unwanted.each { |orphan| discard(orphan) }
     end
 
     # Forgets *page* and closes it with *reason*.
@@ -179,14 +245,35 @@ module Crystalfaux
       page.dispose(reason)
     end
 
-    # Forgets *context* and closes its pages.
+    # Forgets *context*, closes its pages, and cancels its page creations.
     protected def remove_context(context : Context) : Nil
-      pages = @lock.synchronize do
+      pages, creations = @lock.synchronize do
         @contexts.delete(context.id)
-        @pages.values.select(&.context.same?(context)).tap(&.each { |page| @pages.delete(page.target_id) })
+        pages = (@pages.values + @unclaimed.values).select(&.context.same?(context)).uniq!
+        pages.each do |page|
+          @pages.delete(page.target_id)
+          @unclaimed.delete(page.target_id)
+        end
+        {pages, @creations.select(&.context.same?(context))}
       end
       reason = PageClosed.new("Context #{context.id} is closed")
       pages.each(&.dispose(reason))
+      creations.each(&.cancellation.cancel(reason))
+    end
+
+    # Call with `@lock` held. The pages that attached in *context* for a
+    # creation that is no longer pending.
+    private def orphans_of(context : Context) : Array(Page)
+      return [] of Page if @creations.any?(&.context.same?(context))
+      @unclaimed.values.select(&.context.same?(context))
+    end
+
+    # Closes a page that no caller will get, and its target when it is
+    # still open. Blocks for at most `CLEANUP_TIMEOUT`.
+    private def discard(page : Page) : Nil
+      open = !page.closed?
+      page.dispose(PageClosed.new("Page #{page.target_id} was discarded"))
+      page.close_target(CLEANUP_TIMEOUT) if open
     end
 
     private def check_open : Nil
@@ -207,22 +294,24 @@ module Crystalfaux
       # The pipe is already closed or stuck; closing the connection follows.
     end
 
-    # Marks the browser closed, then closes every context and page and fails
-    # every `#wait_for_page` call with *reason*. Only the first call does
-    # anything.
+    # Marks the browser closed, then closes every context and page, cancels
+    # every page creation with *reason*, and removes the browser's handlers
+    # from the connection. Only the first call does anything.
     private def release_all(reason : Exception) : Nil
-      contexts, pages, waiters = @lock.synchronize do
+      contexts, pages, creations = @lock.synchronize do
         return if @closed
         @closed = true
-        taken = {@contexts.values, @pages.values, @page_waiters.values}
+        taken = {@contexts.values, (@pages.values + @unclaimed.values).uniq, @creations.dup}
         @contexts.clear
         @pages.clear
-        @page_waiters.clear
+        @unclaimed.clear
+        @abandoned.clear
         taken
       end
       contexts.each(&.mark_closed)
       pages.each(&.dispose(reason))
-      waiters.each(&.send(reason))
+      creations.each(&.cancellation.cancel(reason))
+      unsubscribe
     end
 
     # Runs on the reader fiber. Creating the page here subscribes it to its
@@ -230,20 +319,48 @@ module Crystalfaux
     private def attached(event : Protocol::Browser::AttachedToTarget) : Nil
       context_id = event.target_info.browser_context_id
       context = context_id.try { |id| @lock.synchronize { @contexts[id]? } }
-      # A target of a context this browser did not create.
+      # A target of a context this browser did not create, or removed.
       return unless context
       page = Page.new(@connection, event.session_id, event.target_info.target_id, context)
-      registered, waiter = @lock.synchronize do
-        next {false, nil} if @closed
-        @pages[page.target_id] = page
-        {true, @page_waiters.delete(page.target_id)}
+      outcome = register(page, awaited: event.target_info.opener_id.nil?)
+      case outcome
+      when PageCreation
+        outcome.deliver(page)
+      when Exception
+        page.dispose(outcome)
+      when Abandoned
+        page.dispose(PageClosed.new("Page #{page.target_id} was discarded"))
+        # The reader must not wait for the reply; the fiber ends within
+        # CLEANUP_TIMEOUT.
+        spawn(name: "crystalfaux-discard-page") { page.close_target(CLEANUP_TIMEOUT) }
       end
-      return page.dispose(ConnectionClosed.new("Browser is closed")) unless registered
-      waiter.try &.send(page)
+    end
+
+    # Registers an attached *page*. Returns the creation waiting for it, the
+    # reason to dispose it right away, `Abandoned` when its creation gave
+    # up, or `nil`. An *awaited* page (one without an opener) is kept for
+    # the creations in its context that do not know their target yet.
+    private def register(page : Page, awaited : Bool) : (PageCreation | Exception | Abandoned)?
+      target_id = page.target_id
+      @lock.synchronize do
+        return ConnectionClosed.new("Browser is closed") if @closed
+        return PageClosed.new("Context #{page.context.id} is closed") if page.context.closed?
+        return Abandoned.new if @abandoned.delete(target_id)
+        @pages[target_id] = page
+        creation = @creations.find(&.target_id.==(target_id))
+        return creation if creation
+        if awaited && @creations.any? { |pending| pending.context.same?(page.context) && pending.target_id.nil? }
+          @unclaimed[target_id] = page
+        end
+        nil
+      end
     end
 
     private def detached(event : Protocol::Browser::DetachedFromTarget) : Nil
-      page = @lock.synchronize { @pages.delete(event.target_id) }
+      page = @lock.synchronize do
+        # An unclaimed page stays in `@unclaimed`, closed, for its creation.
+        @pages.delete(event.target_id) || @unclaimed[event.target_id]?
+      end
       page.try &.dispose(PageClosed.new("Page #{event.target_id} was closed"))
     end
   end

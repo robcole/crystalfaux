@@ -2,14 +2,6 @@ require "../spec_helper"
 
 private alias Page = Crystalfaux::Page
 
-class Crystalfaux::Page
-  # Returns once every event the fake browser sent before this call has been
-  # handled: the reader handles frames in order, so a reply comes after them.
-  def wait_for_events_for_spec : Nil
-    @connection.call("Spec.sync", nil, @session_id)
-  end
-end
-
 private def evaluation_reply(result : String) : Array(JSON::Any)
   [JSON.parse(%({"id":0,"result":#{result}}))]
 end
@@ -73,6 +65,29 @@ describe Crystalfaux::Page do
 
       expect_raises(Crystalfaux::NavigationError, /NS_BINDING_ABORTED/) do
         page.goto(ProbeScript::DATA_URL)
+      end
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises NavigationError when another navigation commits before the load" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      reply = ProbeScript.navigate.first
+      navigation_id = reply["result"]["navigationId"].as_s
+      commit = ->(id : String, url : String) do
+        json_frame({method: "Page.navigationCommitted", sessionId: ProbeScript::SESSION_ID,
+                    params: {frameId: ProbeScript::FRAME_ID, navigationId: id, url: url, name: ""}})
+      end
+      load = json_frame({method: "Page.eventFired", sessionId: ProbeScript::SESSION_ID,
+                         params: {frameId: ProbeScript::FRAME_ID, name: "load"}})
+      fake.on("Page.navigate") do
+        [reply, commit.call(navigation_id, ProbeScript::DATA_URL), commit.call("nav-99", "about:blank#b"), load]
+      end
+
+      expect_raises(Crystalfaux::NavigationError, /replaced/) do
+        page.goto(ProbeScript::DATA_URL, timeout: 1.second)
       end
     ensure
       browser.try &.close
@@ -189,6 +204,28 @@ describe Crystalfaux::Page do
       fake.try &.close
     end
 
+    it "forgets the descendants of a detached frame" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.event("Page.frameAttached", {frameId: "child-1", parentFrameId: ProbeScript::FRAME_ID})
+      fake.event("Page.frameAttached", {frameId: "grandchild-1", parentFrameId: "child-1"})
+      page.wait_for_events_for_spec
+      grandchild = page.main_frame.children.first.children.first
+
+      fake.event("Page.frameDetached", {frameId: "child-1"})
+      fake.event("Page.navigationCommitted", {frameId: "grandchild-1", navigationId: "nav-9", url: "about:srcdoc", name: ""})
+      # A new frame with the old id is a new child, not the old grandchild.
+      fake.event("Page.frameAttached", {frameId: "grandchild-1", parentFrameId: ProbeScript::FRAME_ID})
+      page.wait_for_events_for_spec
+
+      grandchild.url.should eq("")
+      page.main_frame.children.map(&.id).should eq(["grandchild-1"])
+      page.main_frame.children.first.should_not be(grandchild)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
     it "tracks the main and utility worlds of each frame separately" do
       browser, fake = scripted_browser
       page = loaded_page(browser)
@@ -213,6 +250,74 @@ describe Crystalfaux::Page do
     ensure
       browser.try &.close
       fake.try &.close
+    end
+  end
+
+  describe "pending requests" do
+    it "fail with PageCrashed when the page crashes before the navigate reply" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      fake.on("Page.navigate") { [] of JSON::Any }
+      outcome = async { page.goto(ProbeScript::DATA_URL, timeout: 5.seconds); JSON::Any.new(nil) }
+      fake.request("Page.navigate")
+
+      fake.event("Page.crashed", nil)
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::PageCrashed)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "fail with PageCrashed when the page crashes before the evaluate reply" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.evaluate") { [] of JSON::Any }
+      outcome = async { page.evaluate("1", timeout: 5.seconds) }
+      fake.request("Runtime.evaluate")
+
+      fake.event("Page.crashed", nil)
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::PageCrashed)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "fail with PageClosed when the page closes, and a late reply is ignored" do
+      browser, fake = scripted_browser
+      context = browser.new_context
+      page = context.new_page
+      fake.on("Runtime.evaluate") { [] of JSON::Any }
+      outcome = async { page.title(timeout: 5.seconds); JSON::Any.new(nil) }
+      request = fake.request("Runtime.evaluate")
+
+      page.close
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::PageClosed)
+      fake.peer.reply(request["id"], {result: {value: "late"}}, ProbeScript::SESSION_ID)
+      # The late reply is dropped; the connection and context still work.
+      browser.new_context.id.should eq(ProbeScript::CONTEXT_ID)
+      browser.closed?.should be_false
+      context.closed?.should be_false
+      context.pages.should be_empty
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "fail with ConnectionClosed when the pipe closes before the reply" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.evaluate") { [] of JSON::Any }
+      outcome = async { page.evaluate("1", timeout: 5.seconds) }
+      fake.request("Runtime.evaluate")
+
+      fake.close
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::ConnectionClosed)
+    ensure
+      browser.try &.close
     end
   end
 
@@ -249,6 +354,22 @@ describe Crystalfaux::Page do
       page.closed?.should be_true
       context.pages.should be_empty
       expect_raises(Crystalfaux::PageClosed) { page.goto(ProbeScript::DATA_URL) }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "stops following the page's events after its context closes" do
+      browser, fake = scripted_browser
+      context = browser.new_context
+      page = context.new_page
+
+      context.close
+      fake.event("Page.navigationCommitted", {frameId: ProbeScript::FRAME_ID, navigationId: "nav-9", url: "about:blank#late", name: ""})
+      page.wait_for_events_for_spec
+
+      page.url.should eq("about:blank")
+      browser.closed?.should be_false
     ensure
       browser.try &.close
       fake.try &.close

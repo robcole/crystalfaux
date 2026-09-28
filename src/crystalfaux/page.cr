@@ -25,8 +25,12 @@ module Crystalfaux
   #   its request, so events that arrive before the reply count. Closing
   #   the page fails the waiter with the reason: `PageClosed`, or
   #   `ConnectionClosed` when the browser or its pipe closed.
-  # - `Page.crashed` marks the page crashed: waiters and later calls raise
-  #   `PageCrashed`. `#close` still works.
+  # - Requests the page sends carry the page's `Juggler::Cancellation`.
+  #   Closing the page, or a crash, cancels it: a call that waits for its
+  #   reply raises the reason at once, and the reply is dropped when it
+  #   comes. Other pages on the connection are not affected.
+  # - `Page.crashed` marks the page crashed: waiters, pending requests and
+  #   later calls raise `PageCrashed`. `#close` still works.
   class Page
     # The name of the isolated world whose execution contexts are tracked as
     # a frame's `utility_context_id`, as in Playwright
@@ -62,6 +66,7 @@ module Crystalfaux
     @failure : Exception?
     @waiters = [] of Waiter
     @subscriptions = [] of Juggler::Subscription
+    @cancellation = Juggler::Cancellation.new
 
     # :nodoc:
     #
@@ -86,7 +91,8 @@ module Crystalfaux
 
     # Navigates the main frame to *url* and returns after its `load` event.
     #
-    # Raises `NavigationError` when the navigation is aborted, `TimeoutError`
+    # Raises `NavigationError` when the navigation is aborted or another
+    # navigation of the main frame commits before its `load`, `TimeoutError`
     # when it does not load within *timeout*, `ProtocolError` when the
     # browser rejects the URL, and `PageCrashed`, `PageClosed` or
     # `ConnectionClosed` when the page goes away first. A navigation within
@@ -157,9 +163,9 @@ module Crystalfaux
       @lock.synchronize { @crashed }
     end
 
-    # Marks the page closed with *reason*: removes its subscriptions and
-    # fails its waiters. Later calls raise *reason*. Safe to call more than
-    # once; only the first reason counts.
+    # Marks the page closed with *reason*: removes its subscriptions, fails
+    # its waiters and cancels its pending requests. Later calls raise
+    # *reason*. Safe to call more than once; only the first reason counts.
     protected def dispose(reason : Exception) : Nil
       subscriptions, waiters = @lock.synchronize do
         return if @closed
@@ -169,6 +175,17 @@ module Crystalfaux
       end
       subscriptions.each { |subscription| @connection.off(subscription) }
       waiters.each(&.fail(reason))
+      @cancellation.cancel(reason)
+    end
+
+    # Sends `Page.close` for a page that `Browser` gave up on while opening
+    # it, and waits at most *timeout*. Ignores failures: the context removes
+    # the target when it closes. Does not change the page's state; dispose
+    # the page first.
+    protected def close_target(timeout : Time::Span) : Nil
+      Protocol.call(@connection, Protocol::Page::Close.new, @session_id, timeout)
+    rescue Error
+      # Best effort; the original error matters to the caller.
     end
 
     # Returns once the browser has sent `Page.ready`: the main frame and its
@@ -189,14 +206,20 @@ module Crystalfaux
 
     # Waits for the `load` of the document that navigation *navigation_id*
     # commits in *frame_id*. A `load` before that commit belongs to the
-    # previous document.
+    # previous document. A later commit of another navigation replaces the
+    # document before it loads, as Playwright treats an interrupted
+    # navigation.
     private def wait_for_load(waiter : Waiter, frame_id : String, navigation_id : String,
                               deadline : Time::Instant, description : String) : Nil
       committed = false
       waiter.wait(deadline, description) do |event|
         case event
         when Protocol::Page::NavigationCommitted
-          committed ||= event.frame_id == frame_id && event.navigation_id == navigation_id
+          next false unless event.frame_id == frame_id
+          if committed
+            raise NavigationError.new("#{description} was replaced by navigation to #{event.url} before it loaded")
+          end
+          committed = event.navigation_id == navigation_id
           false
         when Protocol::Page::NavigationAborted
           if event.frame_id == frame_id && event.navigation_id == navigation_id
@@ -246,7 +269,7 @@ module Crystalfaux
 
     private def call(request : Protocol::Request(R), deadline : Time::Instant) : R forall R
       check_usable
-      Protocol.call(@connection, request, @session_id, {deadline - Time.instant, Time::Span.zero}.max)
+      Protocol.call(@connection, request, @session_id, {deadline - Time.instant, Time::Span.zero}.max, @cancellation)
     end
 
     private def check_usable : Nil
@@ -364,6 +387,7 @@ module Crystalfaux
         @waiters.dup
       end
       waiters.each(&.fail(failure))
+      @cancellation.cancel(failure)
     end
   end
 end

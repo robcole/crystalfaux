@@ -143,11 +143,13 @@ module Crystalfaux::Protocol
   # Sends *request* through *connection* to *session_id* (the root session
   # when `nil`) and returns its decoded result.
   #
-  # Raises what `Juggler::Connection#call` raises, and `JSON::ParseException`
+  # Raises what `Juggler::Connection#call` raises, including the reason of
+  # a cancelled *cancellation*, and `JSON::ParseException`
   # when the result does not match the schema.
   def self.call(connection : Juggler::Connection, request : Request(R), session_id : String? = nil,
-                timeout : Time::Span = Juggler::Connection::DEFAULT_TIMEOUT) : R forall R
-    request.decode_result(connection.call(request.method_name, request, session_id, timeout))
+                timeout : Time::Span = Juggler::Connection::DEFAULT_TIMEOUT,
+                cancellation : Juggler::Cancellation? = nil) : R forall R
+    request.decode_result(connection.call(request.method_name, request, session_id, timeout, cancellation))
   end
 
   # Decodes *value*, a result or event params, as *type*.

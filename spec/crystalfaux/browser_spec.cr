@@ -1,5 +1,13 @@
 require "../spec_helper"
 
+# Handlers live inside the connection with no public view; this spec-only
+# reader lets the specs prove the browser removes its own.
+class Crystalfaux::Juggler::Connection
+  def handler_count_for_spec : Int32
+    @lock.synchronize { @subscriptions.sum(&.last.size) + @close_handlers.size }
+  end
+end
+
 describe Crystalfaux::Browser do
   describe ".connect" do
     it "enables the browser without the default context, then reads its info" do
@@ -12,6 +20,22 @@ describe Crystalfaux::Browser do
       browser.user_agent.should start_with("Mozilla/5.0")
     ensure
       browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe ".connect" do
+    it "removes its handlers from the connection when the handshake fails" do
+      connection, peer = connected_pair
+      fake = ScriptedBrowser.new(peer)
+      fake.on("Browser.getInfo") { [JSON.parse(%({"id":0,"error":{"message":"no info"}}))] }
+
+      expect_raises(Crystalfaux::ProtocolError, /no info/) { Crystalfaux::Browser.connect(connection) }
+
+      connection.handler_count_for_spec.should eq(0)
+      connection.closed?.should be_false
+    ensure
+      connection.try &.close
       fake.try &.close
     end
   end
@@ -49,6 +73,18 @@ describe Crystalfaux::Browser do
       expect_raises(Crystalfaux::ConnectionClosed) { page.evaluate("1") }
     ensure
       browser.try &.close
+      fake.try &.close
+    end
+
+    it "removes the browser's handlers from the connection" do
+      browser, fake = scripted_browser
+      connection = browser.connection
+      connection.handler_count_for_spec.should be > 0
+
+      browser.close
+
+      connection.handler_count_for_spec.should eq(0)
+    ensure
       fake.try &.close
     end
 

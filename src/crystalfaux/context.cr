@@ -28,16 +28,33 @@ module Crystalfaux
     # Opens a page in this context and returns it once the browser reports
     # it ready (`Page.ready`): its main frame and first document exist.
     #
-    # Raises `TimeoutError` when that takes longer than *timeout*, `Error`
-    # when the context is closed, and `ConnectionClosed` when the browser is.
+    # Raises `TimeoutError` when that takes longer than *timeout*,
+    # `PageClosed` when the context closes first or the page closes before
+    # it is ready, and `ConnectionClosed` when the browser closes.
+    #
+    # On failure after the target exists, the page is forgotten and its
+    # target closed (bounded by `Browser::CLEANUP_TIMEOUT`), and the
+    # original error is raised. A target that attaches after the call gave
+    # up is closed too. Only when the `Browser.newPage` reply itself never
+    # arrives is the target unknown; a page that then attaches stays in the
+    # context until `#close`.
     def new_page(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Page
       deadline = Time.instant + timeout
-      raise Error.new("Context #{@id} is closed") if closed?
-      # The browser registers the page when `Browser.attachedToTarget`
-      # arrives, which Juggler sends before this reply.
-      target_id = Protocol.call(@browser.connection, Protocol::Browser::NewPage.new(@id), timeout: timeout).target_id
-      page = @browser.wait_for_page(target_id, deadline)
-      page.wait_until_ready(deadline)
+      # Registered before the request, so a page that attaches, or even
+      # detaches, before the reply is kept for this call.
+      creation = @browser.begin_creation(self)
+      page : Page? = nil
+      begin
+        request = Protocol::Browser::NewPage.new(@id)
+        target_id = Protocol.call(@browser.connection, request, timeout: timeout,
+          cancellation: creation.cancellation).target_id
+        page = @browser.claim_page(creation, target_id, deadline)
+        page.wait_until_ready(deadline)
+      rescue ex
+        @browser.finish_creation(creation, page, succeeded: false)
+        raise ex
+      end
+      @browser.finish_creation(creation, page, succeeded: true)
       page
     end
 

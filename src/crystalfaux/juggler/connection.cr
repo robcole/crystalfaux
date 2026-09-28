@@ -33,6 +33,9 @@ module Crystalfaux::Juggler
 
     Log = ::Log.for("crystalfaux.juggler")
 
+    # Never closed: the cancellation signal of a call without one.
+    NO_CANCELLATION = Channel(Nil).new
+
     @lock = Sync::Mutex.new
     @next_id = 0_i64
     @pending = {} of Int64 => Channel(JSON::Any)
@@ -56,20 +59,25 @@ module Crystalfaux::Juggler
     # `ConnectionClosed` when the connection is or becomes closed. A reply
     # that arrives after the timeout is dropped.
     #
+    # When *cancellation* is cancelled before the reply arrives, raises its
+    # reason and drops the reply; the connection stays open.
+    #
     # The timeout also covers waiting for the writer and the write itself.
     # When it expires before the request frame is fully written, the
     # connection closes, because a partial frame corrupts the framing of
     # every later message.
     def call(method : String, params : (JSON::Serializable | Hash | NamedTuple | JSON::Any)? = nil,
-             session_id : String? = nil, timeout : Time::Span = DEFAULT_TIMEOUT) : JSON::Any
+             session_id : String? = nil, timeout : Time::Span = DEFAULT_TIMEOUT,
+             cancellation : Cancellation? = nil) : JSON::Any
       deadline = Time.instant + timeout
+      cancellation.try &.reason.try { |reason| raise reason }
       id, reply = register_request
       begin
         # Encoding can raise (for example on NaN), so it runs inside the
         # block that releases the pending entry.
         request = Outgoing.new(encode(id, method, params, session_id))
-        hand_off(request, method, timeout, deadline)
-        message = await(reply, request, method, timeout, deadline)
+        hand_off(request, method, timeout, deadline, cancellation)
+        message = await(reply, request, method, timeout, deadline, cancellation)
       ensure
         @lock.synchronize { @pending.delete(id) }
       end
@@ -90,7 +98,7 @@ module Crystalfaux::Juggler
                session_id : String? = nil, timeout : Time::Span = DEFAULT_TIMEOUT) : Nil
       deadline = Time.instant + timeout
       request = Outgoing.new(encode(next_request_id, method, params, session_id))
-      hand_off(request, method, timeout, deadline)
+      hand_off(request, method, timeout, deadline, nil)
       select
       when request.finished.receive?
         return if request.written?
@@ -134,12 +142,20 @@ module Crystalfaux::Juggler
     # The block runs on the fiber that closes the connection, after pending
     # calls have failed. It must not wait on `#call`. An exception from the
     # block is logged.
-    def on_close(&handler : ->) : Nil
+    #
+    # Returns the handler; pass it to `#off_close` to remove it.
+    def on_close(&handler : ->) : ->
       already_closed = @lock.synchronize do
         @close_handlers << handler unless @closed
         @closed
       end
       run_close_handler(handler) if already_closed
+      handler
+    end
+
+    # Removes a handler that `#on_close` returned.
+    def off_close(handler : ->) : Nil
+      @lock.synchronize { @close_handlers.delete(handler) }
     end
 
     # Fails every pending call with `ConnectionClosed`, closes the transport
@@ -199,9 +215,13 @@ module Crystalfaux::Juggler
       end
     end
 
-    private def hand_off(request : Outgoing, method : String, timeout : Time::Span, deadline : Time::Instant) : Nil
+    private def hand_off(request : Outgoing, method : String, timeout : Time::Span, deadline : Time::Instant,
+                         cancellation : Cancellation?) : Nil
       select
       when @outbox.send(request)
+      when signal_of(cancellation).receive?
+        # The writer never took the request, so no bytes of it were written.
+        raise cancelled(cancellation)
       when timeout(remaining(deadline))
         # The writer never took the request, so no bytes of it were written.
         raise timed_out(method, timeout)
@@ -211,14 +231,25 @@ module Crystalfaux::Juggler
     end
 
     private def await(reply : Channel(JSON::Any), request : Outgoing, method : String,
-                      timeout : Time::Span, deadline : Time::Instant) : JSON::Any
+                      timeout : Time::Span, deadline : Time::Instant, cancellation : Cancellation?) : JSON::Any
       select
       when message = reply.receive?
         message || raise ConnectionClosed.new("Juggler connection closed while waiting for #{method}")
+      when signal_of(cancellation).receive?
+        # The writer finishes the frame if it has not yet; the reply is dropped.
+        raise cancelled(cancellation)
       when timeout(remaining(deadline))
         close unless request.written?
         raise timed_out(method, timeout)
       end
+    end
+
+    private def signal_of(cancellation : Cancellation?) : Channel(Nil)
+      cancellation.try(&.signal) || NO_CANCELLATION
+    end
+
+    private def cancelled(cancellation : Cancellation?) : Exception
+      cancellation.try(&.reason) || raise "BUG: cancellation signalled without a reason"
     end
 
     private def remaining(deadline : Time::Instant) : Time::Span

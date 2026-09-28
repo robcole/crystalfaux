@@ -142,6 +142,57 @@ describe Crystalfaux::Juggler::Connection do
     end
   end
 
+  describe "#call with a cancellation" do
+    it "raises the cancellation reason at once, drops the late reply and stays open" do
+      connection, peer = connected_pair
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      outcome = async { connection.call("Runtime.evaluate", nil, "s1", 5.seconds, cancellation) }
+      request = peer.request
+
+      cancellation.cancel(Crystalfaux::PageCrashed.new("crashed"))
+
+      receive_within(outcome, 200.milliseconds).should be_a(Crystalfaux::PageCrashed)
+      connection.pending_count_for_spec.should eq(0)
+      peer.reply(request["id"], {result: {value: 1}}, "s1")
+      other = async { connection.call("Browser.getInfo") }
+      peer.reply(peer.request["id"], {version: "v"})
+      receive_within(other).should eq(JSON.parse(%({"version":"v"})))
+      connection.closed?.should be_false
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises before sending when already cancelled, keeping the first reason" do
+      connection, peer = connected_pair
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      cancellation.cancel(Crystalfaux::PageClosed.new("closed"))
+      cancellation.cancel(Crystalfaux::PageCrashed.new("crashed"))
+
+      expect_raises(Crystalfaux::PageClosed) { connection.call("Runtime.evaluate", nil, "s1", 1.second, cancellation) }
+      connection.pending_count_for_spec.should eq(0)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#off_close" do
+    it "stops the handler from running" do
+      connection, peer = connected_pair
+      called = false
+      handler = connection.on_close { called = true }
+
+      connection.off_close(handler)
+      connection.close
+
+      called.should be_false
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
   describe "#notify" do
     it "returns once the request is written and drops the reply" do
       connection, peer = connected_pair
