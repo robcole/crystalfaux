@@ -32,4 +32,9 @@ module Crystalfaux
   # waits for its reply.
   class ConnectionClosed < Error
   end
+
+  # Raised when a Camoufox install has a version that the vendored protocol
+  # does not support, or no readable `version.json`.
+  class UnsupportedBrowserError < Error
+  end
 end

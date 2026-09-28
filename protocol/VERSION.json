@@ -1,0 +1,12 @@
+{
+  "source": "https://github.com/daijro/camoufox/blob/eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a/additions/juggler/protocol/Protocol.js",
+  "commit": "eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a",
+  "camoufox_version": "152.0.4",
+  "camoufox_build": "beta.31",
+  "fetched": "2026-09-28",
+  "sha256": "d7bad1be5746cf6e71774963bc0e9d859f8edc4a003a0705fefb4d525034c9ec",
+  "supported": {
+    "min": "152.0.4-beta.30",
+    "max": "152.0.4-beta.31"
+  }
+}

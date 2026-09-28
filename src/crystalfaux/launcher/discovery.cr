@@ -59,6 +59,29 @@ module Crystalfaux::Launcher
       {% end %}
     end
 
+    # Returns the version recorded in the `version.json` of the install in
+    # *directory*, or `nil` when the file is missing or not valid.
+    #
+    # `{"version": "152.0.4", "build": "beta.31"}` gives the semantic version
+    # `152.0.4-beta.31`, so build numbers compare numerically.
+    #
+    # ```
+    # Discovery.install_version(Path["~/Library/Caches/camoufox/browsers/official/152.0.4-beta.31-7b8d12d6"].expand(home: true))
+    # # => SemanticVersion(@major=152, @minor=0, @patch=4, @prerelease=beta.31)
+    # ```
+    def self.install_version(directory : Path) : SemanticVersion?
+      path = directory / "version.json"
+      return unless File.file?(path)
+      info = VersionFile.from_json(File.read(path))
+      # Pad "135.0" to "135.0.0"; SemanticVersion needs three parts.
+      parts = info.version.split('.')
+      version = (parts + ["0"] * {3 - parts.size, 0}.max).join('.')
+      build = info.build.presence
+      SemanticVersion.parse(build ? "#{version}-#{build}" : version)
+    rescue JSON::ParseException | ArgumentError | IO::Error
+      nil
+    end
+
     private def self.newest_install(cache_dir : Path, relative_executable : String) : String?
       return unless Dir.exists?(cache_dir)
       installs = Dir.children(cache_dir).compact_map do |name|
@@ -72,22 +95,8 @@ module Crystalfaux::Launcher
     private def self.install(directory : Path, relative_executable : String) : {SemanticVersion, String}?
       executable = (directory / relative_executable).to_s
       return unless File::Info.executable?(executable) && File.file?(executable)
-      version = version_of(directory / "version.json")
+      version = install_version(directory)
       {version, executable} if version
-    end
-
-    # Parses `{"version": "152.0.4", "build": "beta.31"}` as the semantic
-    # version `152.0.4-beta.31`, so build numbers compare numerically.
-    private def self.version_of(path : Path) : SemanticVersion?
-      return unless File.file?(path)
-      info = VersionFile.from_json(File.read(path))
-      # Pad "135.0" to "135.0.0"; SemanticVersion needs three parts.
-      parts = info.version.split('.')
-      version = (parts + ["0"] * {3 - parts.size, 0}.max).join('.')
-      build = info.build.presence
-      SemanticVersion.parse(build ? "#{version}-#{build}" : version)
-    rescue JSON::ParseException | ArgumentError | IO::Error
-      nil
     end
 
     private struct VersionFile

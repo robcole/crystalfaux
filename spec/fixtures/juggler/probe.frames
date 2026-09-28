@@ -1,0 +1,65 @@
+> {"id":1,"method":"Browser.enable","params":{"attachToDefaultContext":false,"userPrefs":[]}}
+< {"id":1}
+> {"id":2,"method":"Browser.getInfo","params":{}}
+< {"id":2,"result":{"version":"Firefox/152.0.4-beta.31","userAgent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Camoufox/152.0.4-beta.31"}}
+> {"id":3,"method":"Browser.createBrowserContext","params":{"removeOnDetach":true}}
+< {"id":3,"result":{"browserContextId":"91c7da0e-b101-40d3-9f9e-2d0cef67937b"}}
+> {"id":4,"method":"Browser.newPage","params":{"browserContextId":"91c7da0e-b101-40d3-9f9e-2d0cef67937b"}}
+< {"method":"Browser.attachedToTarget","params":{"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","targetInfo":{"targetId":"b424587a-f307-41be-88f9-ea3a5cb727d8","type":"page","browserContextId":"91c7da0e-b101-40d3-9f9e-2d0cef67937b"}}}
+< {"id":4,"result":{"targetId":"b424587a-f307-41be-88f9-ea3a5cb727d8"}}
+< {"method":"Page.frameAttached","params":{"frameId":"mainframe-10"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextsCleared","params":{},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+> {"id":5,"method":"Page.navigate","params":{"frameId":"mainframe-10","url":"data:text/html,<!DOCTYPE html><title>crystalfaux</title>"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-1","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-1"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-2","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-14"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-14","url":"about:blank","name":""},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.ready","sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":5,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"navigationId":"nav-21"}}
+< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-21"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-2"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-3","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-21","url":"data:text/html,<!DOCTYPE html><title>crystalfaux</title>","name":""},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+> {"id":6,"method":"Runtime.evaluate","params":{"executionContextId":"id-3","expression":"[document.title, navigator.webdriver].join(' | ')","returnByValue":true},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":6,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"result":{"value":"crystalfaux | false"}}}
+> {"id":7,"method":"Runtime.evaluate","params":{"executionContextId":"id-3","expression":"undefined","returnByValue":true},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":7,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"result":{}}}
+> {"id":8,"method":"Runtime.evaluate","params":{"executionContextId":"id-3","expression":"throw new Error('boom')","returnByValue":true},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":8,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"exceptionDetails":{"text":"boom","stack":"@debugger eval code:1:7\n"}}}
+> {"id":9,"method":"Runtime.callFunction","params":{"executionContextId":"id-3","functionDeclaration":"(a, b) => a + b","returnByValue":true,"args":[{"value":1},{"value":2}]},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":9,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"result":{"value":3}}}
+> {"id":10,"method":"Page.navigate","params":{"frameId":"mainframe-10","url":"http://127.0.0.1:60664/"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":10,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"navigationId":"nav-23"}}
+< {"method":"Network.requestWillBeSent","params":{"url":"http://127.0.0.1:60664/","frameId":"mainframe-10","isIntercepted":false,"requestId":"11","headers":[{"name":"Host","value":"127.0.0.1:60664"},{"name":"User-Agent","value":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Camoufox/152.0.4-beta.31"},{"name":"Accept","value":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},{"name":"Accept-Language","value":"en-US,en;q=0.9"},{"name":"Accept-Encoding","value":"gzip, deflate, br, zstd"},{"name":"Connection","value":"keep-alive"},{"name":"Upgrade-Insecure-Requests","value":"1"},{"name":"Sec-Fetch-Dest","value":"document"},{"name":"Sec-Fetch-Mode","value":"navigate"},{"name":"Sec-Fetch-Site","value":"none"},{"name":"Sec-Fetch-User","value":"?1"}],"method":"GET","navigationId":"nav-23","cause":"TYPE_DOCUMENT","internalCause":"TYPE_DOCUMENT"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-23"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Network.responseReceived","params":{"requestId":"11","securityDetails":null,"fromCache":false,"headers":[{"name":"Connection","value":"keep-alive"},{"name":"Content-Type","value":"text/html"},{"name":"Set-Cookie","value":"probe=1; Path=/"},{"name":"Content-Length","value":"55"}],"remoteIPAddress":"127.0.0.1","remotePort":60664,"status":200,"statusText":"OK","timing":{"startTime":1790631878539551,"domainLookupStart":1790631878550117,"domainLookupEnd":1790631878550140,"connectStart":1790631878550183,"secureConnectionStart":0,"connectEnd":1790631878550335,"requestStart":1790631878550382,"responseStart":1790631878550526},"fromServiceWorker":false},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Network.requestFinished","params":{"requestId":"11","responseEndTime":1790631878550541,"transferSize":172,"encodedBodySize":55,"protocolVersion":"http/1.1"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-3"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-4","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-23","url":"http://127.0.0.1:60664/","name":""},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+> {"id":11,"method":"Network.getResponseBody","params":{"requestId":"11"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Network.requestWillBeSent","params":{"url":"http://127.0.0.1:60664/favicon.ico","frameId":"mainframe-10","isIntercepted":false,"requestId":"8589934598","headers":[{"name":"Host","value":"127.0.0.1:60664"},{"name":"User-Agent","value":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Camoufox/152.0.4-beta.31"},{"name":"Accept","value":"image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"},{"name":"Accept-Language","value":"en-US,en;q=0.9"},{"name":"Accept-Encoding","value":"gzip, deflate, br, zstd"},{"name":"Connection","value":"keep-alive"},{"name":"Referer","value":"http://127.0.0.1:60664/"},{"name":"Cookie","value":"probe=1"},{"name":"Sec-Fetch-Dest","value":"image"},{"name":"Sec-Fetch-Mode","value":"no-cors"},{"name":"Sec-Fetch-Site","value":"same-origin"}],"method":"GET","cause":"TYPE_IMAGE","internalCause":"TYPE_INTERNAL_IMAGE_FAVICON"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":11,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"base64body":"PCFET0NUWVBFIGh0bWw+PHRpdGxlPm5ldHdvcms8L3RpdGxlPjxwPmNyeXN0YWxmYXV4PC9wPg=="}}
+> {"id":12,"method":"Browser.getCookies","params":{"browserContextId":"91c7da0e-b101-40d3-9f9e-2d0cef67937b"}}
+< {"id":12,"result":{"cookies":[{"name":"probe","value":"1","domain":"127.0.0.1","path":"/","expires":-1,"size":6,"httpOnly":false,"secure":false,"session":true,"sameSite":"None"}]}}
+> {"id":13,"method":"Page.setViewportSize","params":{"viewportSize":{"width":640.0,"height":480.0}},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Network.responseReceived","params":{"requestId":"8589934598","securityDetails":null,"fromCache":false,"headers":[{"name":"Content-Type","value":"text/plain"},{"name":"Content-Length","value":"14"}],"remoteIPAddress":"127.0.0.1","remotePort":60664,"status":404,"statusText":"Not Found","timing":{"startTime":1790631878560449,"domainLookupStart":0,"domainLookupEnd":0,"connectStart":0,"secureConnectionStart":0,"connectEnd":0,"requestStart":1790631878564073,"responseStart":1790631878564217},"fromServiceWorker":false},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Network.requestFinished","params":{"requestId":"8589934598","responseEndTime":1790631878564232,"transferSize":86,"encodedBodySize":14,"protocolVersion":"http/1.1"},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":13,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+> {"id":14,"method":"Page.screenshot","params":{"mimeType":"image/png","clip":{"x":0.0,"y":0.0,"width":2.0,"height":2.0}},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":14,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","result":{"data":"iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2P8////fwYGBgZGGAMAV9UH+8NxzmcAAAAASUVORK5CYII="}}
+> {"id":15,"method":"Page.dispatchMouseEvent","params":{"type":"mousemove","button":0,"x":10.0,"y":10.0,"modifiers":0,"buttons":0},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":15,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+> {"id":16,"method":"Page.close","params":{},"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"id":16,"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc"}
+< {"method":"Browser.detachedFromTarget","params":{"sessionId":"9fd99d08-67ec-4030-9fd9-abaa2a4fdfbc","targetId":"b424587a-f307-41be-88f9-ea3a5cb727d8"}}
+> {"id":17,"method":"Browser.removeBrowserContext","params":{"browserContextId":"91c7da0e-b101-40d3-9f9e-2d0cef67937b"}}
+< {"id":17}
+> {"id":18,"method":"Browser.close","params":{}}
