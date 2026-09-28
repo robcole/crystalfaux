@@ -1,3 +1,5 @@
+require "wait_group"
+
 module Crystalfaux
   # A fixed number of browsers that serve one page at a time each. The pool
   # replaces a browser after it served `pages_per_browser` pages, and when
@@ -34,6 +36,15 @@ module Crystalfaux
   # A browser whose pipe closes while no call uses it is closed at the next
   # call that gets it.
   #
+  # Shutdown: `#close` returns only after every browser the pool launched
+  # has stopped and its profile is removed. It closes the browsers in the
+  # slots, then waits for the launches and replacements that other fibers
+  # have in progress. A launch that returns after `#close` started closes
+  # its browser before `#close` returns. The wait is bounded by the launch
+  # block's own timeout and by `Launcher::BrowserProcess#close`, which kills
+  # a process that does not stop in its grace period. `#close` does not wait
+  # for `#with_page` blocks.
+  #
   # A block whose browser or page dies while it runs gets the error of its
   # next call: `PageCrashed`, `ConnectionClosed` or `PageClosed`. The pool
   # does not retry the block; it replaces the browser for the next call.
@@ -52,6 +63,10 @@ module Crystalfaux
     @lock = Sync::Mutex.new
     @closed = false
     @launches = 0
+    # Counts the launches, browser shutdowns, and `#close` calls in
+    # progress. Each one is added with `@lock` held while the pool is open,
+    # so nothing is added after `#close` starts to wait.
+    @busy = WaitGroup.new
 
     # Makes a pool of *size* browsers. The pool calls *launch* with a launch
     # number (0, 1, 2, ...) each time it needs a browser; it launches none
@@ -89,16 +104,25 @@ module Crystalfaux
 
     # Closes every browser, including browsers that a `#with_page` block
     # uses: that block gets `ConnectionClosed` from its next call. Wakes
-    # the calls that wait for a browser with `PoolClosed`. Safe to call
-    # more than once.
+    # the calls that wait for a browser with `PoolClosed`. Returns when
+    # every browser of the pool has stopped (see "Shutdown" above). Safe to
+    # call more than once; each call waits.
     def close : Nil
       browsers = @lock.synchronize do
-        return if @closed
+        next if @closed
         @closed = true
         @idle.close
+        @busy.add
         @slots.compact_map(&.browser)
       end
-      browsers.each(&.close)
+      if browsers
+        begin
+          browsers.each(&.close)
+        ensure
+          @busy.done
+        end
+      end
+      @busy.wait
     end
 
     def closed? : Bool
@@ -123,16 +147,25 @@ module Crystalfaux
     end
 
     private def launch(slot : Slot) : Browser
-      number = @lock.synchronize { @launches.tap { @launches += 1 } }
-      browser = @launch.call(number)
-      closed = @lock.synchronize do
-        slot.assign(browser) unless @closed
-        @closed
+      number = @lock.synchronize do
+        raise PoolClosed.new("Pool is closed") if @closed
+        @busy.add
+        @launches.tap { @launches += 1 }
       end
-      return browser unless closed
-      # `#close` ran during the launch and did not see this browser.
-      browser.close
-      raise PoolClosed.new("Pool is closed")
+      begin
+        browser = @launch.call(number)
+        closed = @lock.synchronize do
+          slot.assign(browser) unless @closed
+          @closed
+        end
+        return browser unless closed
+        # `#close` ran during the launch and did not see this browser; it
+        # waits for this close.
+        browser.close
+        raise PoolClosed.new("Pool is closed")
+      ensure
+        @busy.done
+      end
     end
 
     # Opens a page in a new context. On failure, the pool replaces the
@@ -193,10 +226,21 @@ module Crystalfaux
       slot.failed? || slot.served >= @pages_per_browser || browser.closed?
     end
 
-    # Takes the slot's browser, if any, and closes it.
+    # Takes the slot's browser, if any, and closes it. When the pool is
+    # closed, `#close` already owns that browser and waits for it.
     private def retire(slot : Slot) : Nil
-      browser = @lock.synchronize { slot.take }
-      browser.try &.close
+      browser, tracked = @lock.synchronize do
+        taken = slot.take
+        track = !taken.nil? && !@closed
+        @busy.add if track
+        {taken, track}
+      end
+      return unless browser
+      begin
+        browser.close
+      ensure
+        @busy.done if tracked
+      end
     end
 
     # :nodoc:

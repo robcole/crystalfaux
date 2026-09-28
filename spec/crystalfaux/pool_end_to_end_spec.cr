@@ -49,4 +49,33 @@ describe Crystalfaux::Pool, tags: "browser" do
     pool.try &.close
     server.try &.close
   end
+
+  it "waits in #close for a browser that another call is replacing" do
+    options = Crystalfaux::Launcher::Options.new(executable: camoufox_binary, headless: true)
+    launched = Channel(Crystalfaux::Browser).new(1)
+    pool = Crystalfaux::Pool.new(size: 1, pages_per_browser: 1) do
+      Crystalfaux::Browser.launch(options).tap { |browser| launched.send(browser) }
+    end
+    done = Channel(Nil).new(1)
+    spawn do
+      pool.with_page { }
+    ensure
+      done.send(nil)
+    end
+    browser = receive_within(launched, 30.seconds)
+    process = browser.process.should_not be_nil
+    # The call rotates the browser after its one page; its shutdown has
+    # started once the browser reports closed.
+    until browser.closed?
+      Fiber.yield
+    end
+
+    pool.close
+
+    process.exited?.should be_true
+    Dir.exists?(process.profile_dir).should be_false
+    receive_within(done, 30.seconds)
+  ensure
+    pool.try &.close
+  end
 end

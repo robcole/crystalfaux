@@ -202,7 +202,105 @@ describe Crystalfaux::Pool do
     end
   end
 
+  describe "#with_page cleanup" do
+    it "raises the block's error after closing its page and context, and reuses the browser" do
+      launches = FakeLaunches.new
+      pool = fake_pool(launches)
+
+      expect_raises(Exception, "block failed") { pool.with_page { raise "block failed" } }
+
+      fake = launches.fakes.first
+      fake.request("Page.close")
+      fake.request("Browser.removeBrowserContext")
+      pool.with_page { }
+      launches.numbers.should eq([0])
+      launches.browsers.first.closed?.should be_false
+    ensure
+      pool.try &.close
+      launches.try &.close
+    end
+
+    it "raises a failed page creation, removes its context, and replaces the browser" do
+      launches = FakeLaunches.new
+      pool = Crystalfaux::Pool.new(size: 1, pages_per_browser: 5) do |number|
+        launches.launch(number).tap do
+          if number == 0
+            launches.fakes.last.on("Browser.newPage") { [json_frame({id: 0, error: {message: "no page"}})] }
+          end
+        end
+      end
+      runs = 0
+
+      expect_raises(Crystalfaux::ProtocolError, /no page/) { pool.with_page { runs += 1 } }
+
+      runs.should eq(0)
+      launches.fakes.first.request("Browser.removeBrowserContext")
+      launches.browsers.first.closed?.should be_true
+      pool.with_page { runs += 1 }
+      runs.should eq(1)
+      launches.numbers.should eq([0, 1])
+    ensure
+      pool.try &.close
+      launches.try &.close
+    end
+
+    it "returns the block's value when closing the page fails, and replaces the browser" do
+      launches = FakeLaunches.new
+      pool = Crystalfaux::Pool.new(size: 1, pages_per_browser: 5) do |number|
+        launches.launch(number).tap do
+          if number == 0
+            launches.fakes.last.on("Page.close") { [json_frame({id: 0, error: {message: "cannot close"}})] }
+          end
+        end
+      end
+
+      pool.with_page { "value" }.should eq("value")
+
+      launches.browsers.first.closed?.should be_true
+      pool.with_page { }
+      launches.numbers.should eq([0, 1])
+    ensure
+      pool.try &.close
+      launches.try &.close
+    end
+  end
+
   describe "#close" do
+    it "waits for a launch in progress, then closes the browser it returns" do
+      launches = FakeLaunches.new
+      started = Channel(Nil).new(1)
+      finish = Channel(Nil).new
+      pool = Crystalfaux::Pool.new(size: 1, pages_per_browser: 5) do |number|
+        started.send(nil)
+        finish.receive
+        launches.launch(number)
+      end
+      checkout = Channel(Exception?).new(1)
+      spawn do
+        pool.with_page { }
+        checkout.send(nil)
+      rescue ex
+        checkout.send(ex)
+      end
+      receive_within(started)
+      closed = Channel(Nil).new(1)
+      spawn do
+        pool.close
+        closed.send(nil)
+      end
+
+      quiet?(closed, 100.milliseconds).should be_true
+      finish.send(nil)
+
+      receive_within(closed)
+      launches.browsers.first.closed?.should be_true
+      launches.fakes.first.request("Browser.close")
+      receive_within(checkout).should be_a(Crystalfaux::PoolClosed)
+    ensure
+      pool.try &.close
+      launches.try &.close
+    end
+
     it "closes every browser and fails later checkouts" do
       launches = FakeLaunches.new
       pool = fake_pool(launches, size: 2)
