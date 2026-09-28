@@ -6,8 +6,9 @@ module Crystalfaux::Launcher
   # ```
   # browser = Crystalfaux::Launcher::BrowserProcess.launch(options)
   # connection = Crystalfaux::Juggler::Connection.new(browser.transport)
+  # connection.call("Browser.enable", {attachToDefaultContext: false, userPrefs: [] of String})
   # connection.call("Browser.getInfo")["version"] # => "Firefox/152.0.4-beta.31"
-  # browser.close
+  # browser.close(connection)
   # ```
   #
   # `.launch` starts the browser through a `sh` wrapper that moves the
@@ -22,11 +23,11 @@ module Crystalfaux::Launcher
   #   the caller owns that directory).
   # - `#transport` wraps the fd 3 / fd 4 pipe ends. A `Juggler::Connection`
   #   built on it owns it too; closing it twice is safe.
-  # - When `.launch` fails after the spawn, it stops the process, closes all
-  #   pipes and removes the temporary profile before it raises.
+  # - When `.launch` fails, it closes the pipes it opened, stops the process
+  #   if it started, and removes the temporary profile before it raises.
   # - `#close` stops the process and releases everything, in this order:
-  #   `Browser.close`, close the pipe, wait, `SIGTERM`, wait, `SIGKILL`,
-  #   remove the temporary profile.
+  #   `Browser.close` through the connection, close the pipe, wait,
+  #   `SIGTERM`, wait, `SIGKILL`, remove the temporary profile.
   #
   # Fibers: `.launch` starts a log reader and an exit waiter. The log reader
   # keeps the last `LOG_TAIL_LINES` lines of stderr and stops at end of
@@ -42,11 +43,6 @@ module Crystalfaux::Launcher
     # runs the browser as the same process (Playwright
     # `server/pipeTransport.ts` expects the same fd layout).
     FD_WRAPPER = %(exec 3<&0 4>&1 </dev/null >&2; exec "$0" "$@")
-
-    # Playwright sends `Browser.close` with this id and ignores the reply
-    # (`server/firefox/firefox.ts`). A connection drops the reply because no
-    # call waits for this id.
-    BROWSER_CLOSE_FRAME = %({"id":-9999,"method":"Browser.close","params":{}})
 
     # Used when `.launch` fails: the browser is not ready, so a long grace
     # period only delays the error.
@@ -83,12 +79,17 @@ module Crystalfaux::Launcher
         raise LaunchError.new("#{executable} is not an executable file")
       end
 
+      # Encoding can raise (for example `JSON::Error` on NaN), so it runs
+      # before anything is allocated.
+      environment = Launcher.environment(options)
       owned_profile = options.profile_dir
       profile_dir = owned_profile || create_temp_profile
+      command = ["-c", FD_WRAPPER, executable] + Launcher.arguments(options, profile_dir)
       browser = begin
-        new(executable, options, profile_dir, owns_profile: owned_profile.nil?)
-      rescue ex : IO::Error
+        new(command, environment, profile_dir, owns_profile: owned_profile.nil?)
+      rescue ex
         FileUtils.rm_rf(profile_dir) unless owned_profile
+        raise ex unless ex.is_a?(IO::Error)
         raise LaunchError.new("Could not start #{executable}: #{ex.message}", cause: ex)
       end
       browser.wait_until_ready(timeout)
@@ -99,21 +100,22 @@ module Crystalfaux::Launcher
       File.tempname("crystalfaux-profile").tap { |path| Dir.mkdir(path) }
     end
 
-    # Creates the pipes and spawns the process. The parent closes the child's
-    # pipe ends right away, so it sees end of stream when the child exits.
-    private def initialize(executable : String, options : Options, @profile_dir : String, *, @owns_profile : Bool)
-      child_input, pipe_input = IO.pipe(read_blocking: true)
-      pipe_output, child_output = IO.pipe(write_blocking: true)
-      log_output, child_error = IO.pipe(write_blocking: true)
+    # Creates the pipes and spawns `sh` with *command*. On failure it closes
+    # every pipe it opened. On success the parent closes the child's pipe
+    # ends right away, so it sees end of stream when the child exits.
+    private def initialize(command : Array(String), env : Hash(String, String), @profile_dir : String,
+                           *, @owns_profile : Bool)
+      opened = [] of IO::FileDescriptor
       begin
-        process = Process.new("sh", ["-c", FD_WRAPPER, executable] + Launcher.arguments(options, @profile_dir),
-          env: Launcher.environment(options), input: child_input, output: child_output, error: child_error)
+        child_input, pipe_input = track(opened, IO.pipe(read_blocking: true))
+        pipe_output, child_output = track(opened, IO.pipe(write_blocking: true))
+        log_output, child_error = track(opened, IO.pipe(write_blocking: true))
+        process = Process.new("sh", command, env: env, input: child_input, output: child_output, error: child_error)
       rescue ex
-        {pipe_input, pipe_output, log_output}.each(&.close)
+        opened.each(&.close)
         raise ex
-      ensure
-        {child_input, child_output, child_error}.each(&.close)
       end
+      {child_input, child_output, child_error}.each(&.close)
       @process = process
       @transport = Juggler::Transport.new(IO::Stapled.new(pipe_output, pipe_input, sync_close: true))
       spawn(name: "camoufox-log") { read_log(log_output) }
@@ -139,16 +141,17 @@ module Crystalfaux::Launcher
     # Stops the browser and returns its exit status. Safe to call more than
     # once; later calls return the same status.
     #
-    # Sends `Browser.close` on the pipe unless it is already closed, closes
-    # the pipe, and waits up to *grace* for the exit. `Browser.close` alone
-    # does not end Camoufox; closing the pipe does. Then it sends `SIGTERM`,
-    # waits up to *grace* again, and sends `SIGKILL`. Last, it removes the
-    # temporary profile.
-    def close(grace : Time::Span = DEFAULT_GRACE) : Process::Status
+    # With a *connection*, first sends `Browser.close` through it and waits
+    # up to *grace* for the frame to be written; the reply is not awaited.
+    # Then, whether or not that send worked, it closes the pipe and waits up
+    # to *grace* for the exit. `Browser.close` alone does not end Camoufox;
+    # closing the pipe does. Then it sends `SIGTERM`, waits up to *grace*
+    # again, and sends `SIGKILL`. Last, it removes the temporary profile.
+    def close(connection : Juggler::Connection? = nil, grace : Time::Span = DEFAULT_GRACE) : Process::Status
       @close_lock.synchronize do
         closed_status = @closed_status
         return closed_status if closed_status
-        send_browser_close
+        request_close(connection, grace) if connection
         @closed_status = stop(grace)
       end
     end
@@ -176,10 +179,16 @@ module Crystalfaux::Launcher
       raise LaunchError.new(with_log_tail(reason))
     end
 
-    private def send_browser_close : Nil
-      @transport.send(BROWSER_CLOSE_FRAME)
-    rescue ConnectionClosed
-      # The connection closed the pipe already, which also ends the browser.
+    private def request_close(connection : Juggler::Connection, grace : Time::Span) : Nil
+      connection.notify("Browser.close", timeout: grace)
+    rescue ConnectionClosed | TimeoutError
+      # The pipe is closed, broken or full. Closing it next ends the browser,
+      # and the signals follow when it does not.
+    end
+
+    private def track(opened : Array(IO::FileDescriptor), pipe : {IO::FileDescriptor, IO::FileDescriptor}) : {IO::FileDescriptor, IO::FileDescriptor}
+      opened.push(*pipe)
+      pipe
     end
 
     private def stop(grace : Time::Span) : Process::Status

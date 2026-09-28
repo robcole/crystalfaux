@@ -73,10 +73,13 @@ describe Crystalfaux::Launcher::Discovery do
       with_cache do |cache|
         valid = install(cache, "150.0-beta.1-aaaa", "150.0", "beta.1")
         Dir.mkdir_p(cache / "empty")
-        broken = cache / "broken"
-        Dir.mkdir_p(broken)
-        File.write(broken / "version.json", "not json")
-        File.write(broken / "camoufox", "")
+        {"not json", %({"build":"beta.1"}), %({"version":"latest","build":"beta.1"})}.each_with_index do |json, index|
+          broken = cache / "broken-#{index}"
+          Dir.mkdir_p(broken)
+          File.write(broken / "version.json", json)
+          File.write(broken / "camoufox", "#!/bin/sh\n")
+          File.chmod(broken / "camoufox", 0o755)
+        end
         missing = cache / "no-binary"
         Dir.mkdir_p(missing)
         File.write(missing / "version.json", {version: "160.0.0", build: "beta.1"}.to_json)

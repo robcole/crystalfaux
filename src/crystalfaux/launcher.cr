@@ -14,8 +14,8 @@ require "json"
 # ```
 module Crystalfaux::Launcher
   # The largest value of one `CAMOU_CONFIG_n` or `CAMOU_PREFS_n` variable, in
-  # characters (Camoufox `pythonlib/camoufox/utils.py`; 2,047 on Windows,
-  # which crystalfaux does not support).
+  # bytes (Camoufox `pythonlib/camoufox/utils.py` uses 32,767; 2,047 on
+  # Windows, which crystalfaux does not support).
   CHUNK_SIZE = 32_767
 
   # Returns the browser arguments for *options*, in the order of Playwright's
@@ -44,13 +44,28 @@ module Crystalfaux::Launcher
   end
 
   # Splits *payload* into `<prefix>_1..N` variables of at most `CHUNK_SIZE`
-  # characters each.
+  # bytes each, and never inside a UTF-8 character.
   #
-  # The split counts characters, as Python slices a `str`, so a multibyte
-  # character never breaks across two variables.
+  # Python slices a `str` by characters, so its chunks can exceed 32,767
+  # bytes when the JSON holds non-ASCII text. This counts bytes on purpose:
+  # the limit is on the environment value, which is bytes. Camoufox joins
+  # the chunks before it parses them, so both splits give the same JSON.
+  #
+  # ```
+  # Crystalfaux::Launcher.chunk("CAMOU_CONFIG", %({"a":1}))
+  # # => {"CAMOU_CONFIG_1" => %({"a":1})}
+  # ```
   def self.chunk(prefix : String, payload : String) : Hash(String, String)
-    payload.each_char.each_slice(CHUNK_SIZE).with_index(1).to_h do |chars, index|
-      {"#{prefix}_#{index}", chars.join}
+    chunks = [] of String
+    current = String::Builder.new
+    payload.each_char do |char|
+      if current.bytesize + char.bytesize > CHUNK_SIZE
+        chunks << current.to_s
+        current = String::Builder.new
+      end
+      current << char
     end
+    chunks << current.to_s if current.bytesize > 0
+    chunks.each.with_index(1).to_h { |chunk, index| {"#{prefix}_#{index}", chunk} }
   end
 end

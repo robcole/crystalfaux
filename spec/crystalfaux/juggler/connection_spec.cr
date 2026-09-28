@@ -142,6 +142,55 @@ describe Crystalfaux::Juggler::Connection do
     end
   end
 
+  describe "#notify" do
+    it "returns once the request is written and drops the reply" do
+      connection, peer = connected_pair
+
+      connection.notify("Browser.close", timeout: 1.second)
+
+      request = peer.request
+      request["method"].should eq("Browser.close")
+      peer.reply(request["id"], {} of String => String)
+      outcome = async { connection.call("Browser.getInfo") }
+      follow_up = peer.request
+      follow_up["id"].as_i64.should be > request["id"].as_i64
+      peer.reply(follow_up["id"], {version: "Firefox/152.0"})
+      receive_within(outcome).should eq(JSON.parse(%({"version":"Firefox/152.0"})))
+      connection.pending_count_for_spec.should eq(0)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "times out while another request fills the pipe the peer never reads" do
+      connection, peer = connected_pair
+      blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, timeout: 5.seconds) }
+      Fiber.yield
+      started = Time.instant
+
+      expect_raises(Crystalfaux::TimeoutError, /Browser.close/) do
+        connection.notify("Browser.close", timeout: 50.milliseconds)
+      end
+
+      (Time.instant - started).should be < 1.second
+      connection.close
+      receive_within(blocked).should be_a(Crystalfaux::ConnectionClosed)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises ConnectionClosed after the connection is closed" do
+      connection, peer = connected_pair
+      connection.close
+
+      expect_raises(Crystalfaux::ConnectionClosed) { connection.notify("Browser.close") }
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
   describe "#on" do
     it "routes events by session and method" do
       connection, peer = connected_pair

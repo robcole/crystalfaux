@@ -75,6 +75,31 @@ module Crystalfaux::Juggler
       result_of(method, message)
     end
 
+    # Writes *method* with *params* to *session_id* and returns once the
+    # request frame is written, without waiting for a reply. A reply that
+    # arrives later is dropped.
+    #
+    # Use it for requests whose reply may never come, such as `Browser.close`
+    # (Playwright `server/firefox/firefox.ts` ignores that reply too).
+    # Raises `TimeoutError` when the frame is not fully written within
+    # *timeout*, and `ConnectionClosed` when the connection is or becomes
+    # closed first. As with `#call`, a timeout during the write closes the
+    # connection.
+    def notify(method : String, params : (JSON::Serializable | Hash | NamedTuple | JSON::Any)? = nil,
+               session_id : String? = nil, timeout : Time::Span = DEFAULT_TIMEOUT) : Nil
+      deadline = Time.instant + timeout
+      request = Outgoing.new(encode(next_request_id, method, params, session_id))
+      hand_off(request, method, timeout, deadline)
+      select
+      when request.finished.receive?
+        return if request.written?
+        raise ConnectionClosed.new("Juggler connection closed while writing #{method}")
+      when timeout(remaining(deadline))
+        close unless request.written?
+        raise timed_out(method, timeout)
+      end
+    end
+
     # Calls the block with the `params` of every *method* event from
     # *session_id* (the root session when `nil`).
     #
@@ -119,13 +144,22 @@ module Crystalfaux::Juggler
 
     private def register_request : {Int64, Channel(JSON::Any)}
       @lock.synchronize do
-        raise ConnectionClosed.new("Juggler connection is closed") if @closed
-        id = @next_id += 1
+        id = allocate_id
         # Capacity 1 lets the reader deliver without waiting for the caller.
         reply = Channel(JSON::Any).new(1)
         @pending[id] = reply
         {id, reply}
       end
+    end
+
+    private def next_request_id : Int64
+      @lock.synchronize { allocate_id }
+    end
+
+    # Call with `@lock` held.
+    private def allocate_id : Int64
+      raise ConnectionClosed.new("Juggler connection is closed") if @closed
+      @next_id += 1
     end
 
     private def encode(id : Int64, method : String, params, session_id : String?) : String
@@ -181,8 +215,12 @@ module Crystalfaux::Juggler
 
     private def write_frames : Nil
       while request = @outbox.receive?
-        @transport.send(request.frame)
-        request.written = true
+        begin
+          @transport.send(request.frame)
+          request.written = true
+        ensure
+          request.finish
+        end
       end
     rescue ConnectionClosed
       # The pipe is broken; no later request can be written either.
@@ -225,8 +263,11 @@ module Crystalfaux::Juggler
     end
 
     # A request frame and whether the writer has finished writing it.
+    # `#finished` closes when the writer is done with the frame, whether the
+    # write succeeded or failed.
     private class Outgoing
       getter frame : String
+      getter finished = Channel(Nil).new
       @written = Atomic(Bool).new(false)
 
       def initialize(@frame : String)
@@ -238,6 +279,10 @@ module Crystalfaux::Juggler
 
       def written=(value : Bool) : Bool
         @written.set(value)
+      end
+
+      def finish : Nil
+        @finished.close
       end
     end
   end

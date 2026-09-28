@@ -30,19 +30,66 @@ describe Crystalfaux::Launcher::BrowserProcess do
     browser.try &.close
   end
 
-  it "sends Browser.close, closes the pipe and removes the temp profile" do
+  it "sends Browser.close through the connection, closes the pipe and removes the temp profile" do
     record = File.tempname("crystalfaux-frames")
     browser = launch(fake_options("record", FAKE_RECORD: record))
+    connection = Crystalfaux::Juggler::Connection.new(browser.transport)
 
-    status = browser.close
+    status = browser.close(connection)
 
     status.success?.should be_true
-    File.read(record).should eq(%({"id":-9999,"method":"Browser.close","params":{}}\0))
+    frames = File.read(record).split('\0', remove_empty: true).map { |frame| JSON.parse(frame) }
+    frames.map(&.["method"]).should eq(["Browser.close"])
     Dir.exists?(browser.profile_dir).should be_false
     browser.transport.closed?.should be_true
     browser.close.should eq(status)
   ensure
+    connection.try &.close
     File.delete?(record) if record
+  end
+
+  it "only closes the pipe when no connection is given" do
+    record = File.tempname("crystalfaux-frames")
+    browser = launch(fake_options("record", FAKE_RECORD: record))
+
+    browser.close.success?.should be_true
+
+    File.read(record).should be_empty
+  ensure
+    File.delete?(record) if record
+  end
+
+  it "escalates to SIGKILL when a large frame fills the pipe the browser never reads" do
+    browser = launch(fake_options("stubborn"))
+    connection = Crystalfaux::Juggler::Connection.new(browser.transport)
+    # Far larger than a pipe buffer, so the writer blocks with the frame in
+    # flight and Browser.close cannot be written.
+    blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 1_000_000}, timeout: 30.seconds) }
+    sleep 100.milliseconds
+    closing = Channel(Process::Status).new(1)
+    spawn { closing.send(browser.close(connection, grace: 100.milliseconds)) }
+
+    status = receive_within(closing, 3.seconds)
+
+    status.exit_signal?.should eq(Signal::KILL)
+    Dir.exists?(browser.profile_dir).should be_false
+    receive_within(blocked).should be_a(Crystalfaux::ConnectionClosed)
+  ensure
+    connection.try &.close
+  end
+
+  it "closes the pipe even while a raw transport write is blocked" do
+    browser = launch(fake_options("stubborn"))
+    spawn do
+      browser.transport.send("x" * 1_000_000)
+    rescue Crystalfaux::ConnectionClosed
+    end
+    sleep 100.milliseconds
+    closing = Channel(Process::Status).new(1)
+    spawn { closing.send(browser.close(grace: 100.milliseconds)) }
+
+    receive_within(closing, 3.seconds).exit_signal?.should eq(Signal::KILL)
+    Dir.exists?(browser.profile_dir).should be_false
   end
 
   it "sends SIGKILL when the browser ignores pipe close and SIGTERM" do
@@ -87,6 +134,15 @@ describe Crystalfaux::Launcher::BrowserProcess do
     launcher_profiles.should eq(before)
   end
 
+  it "raises the encoding error and leaves no profile when the config cannot be encoded" do
+    before = launcher_profiles
+    options = fake_options.copy_with(config: {"bad" => JSON::Any.new(Float64::NAN)})
+
+    expect_raises(JSON::Error, /NaN/) { launch(options) }
+
+    launcher_profiles.should eq(before)
+  end
+
   it "fails before spawning when the executable does not exist" do
     options = Crystalfaux::Launcher::Options.new(executable: "/nonexistent/camoufox")
 
@@ -106,7 +162,7 @@ describe Crystalfaux::Launcher::BrowserProcess, tags: "browser" do
     info = connection.call("Browser.getInfo")
     info["version"].as_s.should start_with("Firefox/")
 
-    browser.close
+    browser.close(connection)
     browser.exited?.should be_true
     Dir.exists?(browser.profile_dir).should be_false
   ensure
