@@ -19,6 +19,9 @@ development_dependencies:
 
 # Ameba 1.7 no longer builds itself on `shards install`. This target builds
 # it into bin/ameba with `shards build ameba`; bin/check does so when needed.
+# `shards build crystalfaux` builds the `crystalfaux fetch` command.
 targets:
   ameba:
     main: lib/ameba/bin/ameba.cr
+  crystalfaux:
+    main: src/cli.cr

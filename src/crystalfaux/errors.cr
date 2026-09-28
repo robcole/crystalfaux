@@ -66,4 +66,9 @@ module Crystalfaux
   # context was closed.
   class PageClosed < Error
   end
+
+  # Raised when `Fetch` cannot find, download, verify or install a Camoufox
+  # build.
+  class FetchError < Error
+  end
 end

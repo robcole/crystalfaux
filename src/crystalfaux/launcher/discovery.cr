@@ -88,13 +88,24 @@ module Crystalfaux::Launcher
       path = directory / "version.json"
       return unless File.file?(path)
       info = VersionFile.from_json(File.read(path))
-      # Pad "135.0" to "135.0.0"; SemanticVersion needs three parts.
-      parts = info.version.split('.')
-      version = (parts + ["0"] * {3 - parts.size, 0}.max).join('.')
-      build = info.build.presence
-      SemanticVersion.parse(build ? "#{version}-#{build}" : version)
+      semantic_version(info.version, info.build)
     rescue JSON::ParseException | ArgumentError | IO::Error
       nil
+    end
+
+    # Returns the semantic version of a Camoufox *version* and *build*, as
+    # they appear in `version.json` and in release asset names. Raises
+    # `ArgumentError` when they do not form a semantic version.
+    #
+    # ```
+    # Discovery.semantic_version("135.0", "beta.24") # => SemanticVersion("135.0.0-beta.24")
+    # ```
+    def self.semantic_version(version : String, build : String?) : SemanticVersion
+      # Pad "135.0" to "135.0.0"; SemanticVersion needs three parts.
+      parts = version.split('.')
+      padded = (parts + ["0"] * {3 - parts.size, 0}.max).join('.')
+      build = build.presence
+      SemanticVersion.parse(build ? "#{padded}-#{build}" : padded)
     end
 
     private def self.newest_install(cache_dir : Path, relative_executable : String) : String?

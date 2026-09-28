@@ -4,3 +4,4 @@ plans
 *.dwarf
 /bin/ameba
 /.crystal-cache/
+/bin/crystalfaux
