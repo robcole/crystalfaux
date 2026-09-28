@@ -5,3 +5,5 @@ end
 
 require "./crystalfaux/errors"
 require "./crystalfaux/juggler/*"
+require "./crystalfaux/launcher"
+require "./crystalfaux/launcher/*"

@@ -23,6 +23,11 @@ module Crystalfaux
   class TimeoutError < Error
   end
 
+  # Raised when the browser cannot be started: the executable is missing,
+  # or the browser exits or stays silent before it is ready.
+  class LaunchError < Error
+  end
+
   # Raised when the pipe to the browser is closed, or closes while a request
   # waits for its reply.
   class ConnectionClosed < Error
