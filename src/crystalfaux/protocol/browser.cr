@@ -5,6 +5,7 @@ module Crystalfaux::Protocol
   module Browser
     Protocol.wire_enum(TargetType, page: "page")
     Protocol.wire_enum(SameSite, strict: "Strict", lax: "Lax", none: "None")
+    Protocol.wire_enum(ProxyType, http: "http", https: "https", socks: "socks", socks4: "socks4")
 
     struct TargetInfo
       include Message
@@ -163,6 +164,41 @@ module Crystalfaux::Protocol
       field headers : Array(Network::HTTPHeader)
 
       def initialize(@headers : Array(Network::HTTPHeader), @browser_context_id : String? = nil)
+      end
+    end
+
+    struct SetBrowserProxy
+      include Message
+      include Request(Empty)
+      METHOD = "Browser.setBrowserProxy"
+
+      field type : ProxyType
+      field bypass : Array(String)
+      field host : String
+      field port : Int32
+      field username : String?
+      field password : String?
+
+      def initialize(@type : ProxyType, @host : String, @port : Int32, @bypass : Array(String),
+                     @username : String? = nil, @password : String? = nil)
+      end
+    end
+
+    struct SetContextProxy
+      include Message
+      include Request(Empty)
+      METHOD = "Browser.setContextProxy"
+
+      field browser_context_id : String?
+      field type : ProxyType
+      field bypass : Array(String)
+      field host : String
+      field port : Int32
+      field username : String?
+      field password : String?
+
+      def initialize(@browser_context_id : String?, @type : ProxyType, @host : String, @port : Int32,
+                     @bypass : Array(String), @username : String? = nil, @password : String? = nil)
       end
     end
 

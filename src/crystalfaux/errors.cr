@@ -71,4 +71,9 @@ module Crystalfaux
   # build.
   class FetchError < Error
   end
+
+  # Raised when a fingerprint config has an unknown key, a value of the
+  # wrong type, or a user agent that does not match its OS.
+  class ConfigError < Error
+  end
 end

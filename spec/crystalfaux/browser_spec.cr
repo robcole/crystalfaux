@@ -55,6 +55,59 @@ describe Crystalfaux::Browser do
     end
   end
 
+  describe ".connect with a proxy" do
+    it "sets the browser proxy after Browser.enable and before Browser.getInfo" do
+      connection, peer = connected_pair
+      fake = ScriptedBrowser.new(peer)
+      proxy = Crystalfaux::Proxy.new("proxy.test", 3128, type: :socks, username: "user", password: "secret",
+        bypass: [".internal", "localhost"])
+
+      browser = Crystalfaux::Browser.connect(connection, proxy: proxy)
+
+      fake.methods.first(3).should eq(["Browser.enable", "Browser.setBrowserProxy", "Browser.getInfo"])
+      fake.request("Browser.setBrowserProxy")["params"].should eq(JSON.parse(<<-JSON))
+        {"type":"socks","bypass":[".internal","localhost"],"host":"proxy.test","port":3128,
+         "username":"user","password":"secret"}
+        JSON
+
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "#new_context with a proxy" do
+    it "sets the proxy of the new context before returning it" do
+      browser, fake = scripted_browser
+
+      context = browser.new_context(proxy: Crystalfaux::Proxy.new("127.0.0.1", 8080))
+
+      fake.methods.last(2).should eq(["Browser.createBrowserContext", "Browser.setContextProxy"])
+      fake.request("Browser.setContextProxy")["params"].should eq(JSON.parse(<<-JSON))
+        {"browserContextId":"#{ProbeScript::CONTEXT_ID}","type":"http","bypass":[],"host":"127.0.0.1","port":8080}
+        JSON
+      browser.contexts.should eq([context])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "removes the context and raises when the browser rejects the proxy" do
+      browser, fake = scripted_browser
+      fake.on("Browser.setContextProxy") { [JSON.parse(%({"id":0,"error":{"message":"bad proxy"}}))] }
+
+      expect_raises(Crystalfaux::ProtocolError, /bad proxy/) do
+        browser.new_context(proxy: Crystalfaux::Proxy.new("127.0.0.1", 8080))
+      end
+
+      fake.request("Browser.removeBrowserContext")["params"].should eq(JSON.parse(%({"browserContextId":"#{ProbeScript::CONTEXT_ID}"})))
+      browser.contexts.should be_empty
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
   describe "#close" do
     it "sends Browser.close, then closes the pipe, and closes every context and page" do
       browser, fake = scripted_browser

@@ -110,7 +110,10 @@ module Crystalfaux::Launcher
         child_input, pipe_input = track(opened, IO.pipe(read_blocking: true))
         pipe_output, child_output = track(opened, IO.pipe(write_blocking: true))
         log_output, child_error = track(opened, IO.pipe(write_blocking: true))
-        process = Process.new("sh", command, env: env, input: child_input, output: child_output, error: child_error)
+        # *env* is the whole environment (`Launcher.environment`), so the
+        # parent's variables are not inherited on top of it.
+        process = Process.new("sh", command, env: env, clear_env: true,
+          input: child_input, output: child_output, error: child_error)
       rescue ex
         opened.each(&.close)
         raise ex

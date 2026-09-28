@@ -18,6 +18,8 @@ module Crystalfaux::Launcher
   #   `BrowserProcess` creates a temporary profile and removes it on close.
   # - *args*: extra browser arguments, added before `-silent`.
   # - *config*: the Camoufox fingerprint config, sent as `CAMOU_CONFIG_n`.
+  #   It is not validated here; `Browser.launch(config:)` takes a validated
+  #   `Fingerprint::Config`.
   # - *prefs*: Firefox preferences, sent as `CAMOU_PREFS_n`.
   # - *env*: extra environment variables. They override generated ones.
   #

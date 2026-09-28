@@ -9,8 +9,8 @@ require "json"
 # options = Crystalfaux::Launcher::Options.new(headless: true)
 # Crystalfaux::Launcher.arguments(options, "/tmp/profile")
 # # => ["-no-remote", "-headless", "-profile", "/tmp/profile", "-juggler-pipe", "-silent"]
-# Crystalfaux::Launcher.environment(options)
-# # => {"CAMOU_CONFIG_1" => "{}", "CAMOU_PREFS_1" => "{}"}
+# Crystalfaux::Launcher.environment(options, base: {"PATH" => "/usr/bin"})
+# # => {"PATH" => "/usr/bin", "CAMOU_CONFIG_1" => "{}", "CAMOU_PREFS_1" => "{}"}
 # ```
 module Crystalfaux::Launcher
   # The largest value of one `CAMOU_CONFIG_n` or `CAMOU_PREFS_n` variable, in
@@ -32,13 +32,23 @@ module Crystalfaux::Launcher
     arguments << "-silent"
   end
 
-  # Returns the environment variables to add for *options*: the config and
-  # prefs as JSON chunks, then `options.env`.
+  # The prefixes of the variables that carry the config and prefs. The
+  # launcher removes inherited ones, because Camoufox joins every
+  # `CAMOU_CONFIG_n` it finds (`additions/camoucfg/MaskConfig.hpp`, which
+  # also reads an unchunked `CAMOU_CONFIG`), and `settings/camoufox.cfg`
+  # does the same for `CAMOU_PREFS_n`. A stale `CAMOU_CONFIG_3` from the
+  # parent would be appended to a two-chunk config.
+  RESERVED_PREFIXES = {"CAMOU_CONFIG", "CAMOU_PREFS"}
+
+  # Returns the complete environment of the browser for *options*: *base*
+  # without inherited `CAMOU_CONFIG*` and `CAMOU_PREFS*` variables, then the
+  # config and prefs as JSON chunks, then `options.env`.
   #
-  # Camoufox joins `CAMOU_CONFIG_1..N` back into one JSON document at
-  # startup; its `camoufox.cfg` does the same for `CAMOU_PREFS_1..N`.
-  def self.environment(options : Options) : Hash(String, String)
-    chunk("CAMOU_CONFIG", options.config.to_json)
+  # The prefs must travel here, not in `Browser.enable`: `camoufox.cfg`
+  # applies them at startup, before Firefox caches some of them.
+  def self.environment(options : Options, base : Hash(String, String) = ENV.to_h) : Hash(String, String)
+    base.reject { |name, _| RESERVED_PREFIXES.any? { |prefix| name.starts_with?(prefix) } }
+      .merge!(chunk("CAMOU_CONFIG", options.config.to_json))
       .merge!(chunk("CAMOU_PREFS", options.prefs.to_json))
       .merge!(options.env)
   end

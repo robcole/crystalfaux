@@ -74,14 +74,16 @@ module Crystalfaux
     @shut_down = false
 
     # Finds the Camoufox executable, checks that its version speaks the
-    # vendored protocol, starts it and connects to it.
+    # vendored protocol, starts it and connects to it. With a *proxy*, every
+    # request of the browser goes through it, unless a context has its own
+    # (`#new_context`).
     #
     # Raises `LaunchError` when no executable is found or the browser does
     # not start, `UnsupportedBrowserError` when its version is not
     # supported, and what the handshake raises. On failure, the process is
     # stopped and its temporary profile removed.
     def self.launch(options : Launcher::Options = Launcher::Options.new,
-                    timeout : Time::Span = DEFAULT_TIMEOUT) : self
+                    timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil) : self
       executable = Launcher::Discovery.executable(options.executable)
       unless executable
         raise LaunchError.new("Camoufox executable not found; set CRYSTALFAUX_CAMOUFOX or install Camoufox")
@@ -90,7 +92,7 @@ module Crystalfaux
       process = Launcher::BrowserProcess.launch(options.copy_with(executable: executable), timeout)
       connection = Juggler::Connection.new(process.transport)
       begin
-        connect(connection, process, timeout)
+        connect(connection, process, timeout, proxy: proxy)
       rescue ex
         process.close(connection)
         connection.close
@@ -98,21 +100,37 @@ module Crystalfaux
       end
     end
 
+    # Launches the browser with a fingerprint *config* and Firefox *prefs*,
+    # which replace those of *options*. Both reach the browser in its
+    # environment (`Launcher.environment`), so they apply from startup.
+    #
+    # ```
+    # config = Crystalfaux::Fingerprint::Config.for(os: :mac, screen: Crystalfaux::Fingerprint::Screen.new(1512, 982),
+    #   user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0")
+    # browser = Crystalfaux::Browser.launch(config: config, prefs: {"media.autoplay.default" => JSON::Any.new(0_i64)})
+    # ```
+    def self.launch(*, config : Fingerprint::Config, prefs : Hash(String, JSON::Any) = {} of String => JSON::Any,
+                    proxy : Proxy? = nil, options : Launcher::Options = Launcher::Options.new,
+                    timeout : Time::Span = DEFAULT_TIMEOUT) : self
+      launch(options.copy_with(config: config.to_h, prefs: prefs), timeout, proxy: proxy)
+    end
+
     # :nodoc:
     #
     # Drives the browser at the other end of *connection*: subscribes to
     # page targets, then sends `Browser.enable` (without the default
-    # context) and `Browser.getInfo`, as Playwright's
-    # `server/firefox/ffBrowser.ts` does. `.launch` and the specs use it.
+    # context), `Browser.setBrowserProxy` when there is a *proxy*, and
+    # `Browser.getInfo`, as Playwright's `server/firefox/ffBrowser.ts` does.
+    # `.launch` and the specs use it.
     #
     # The browser owns *connection* and *process* from then on. When the
     # handshake raises, it removes its handlers from *connection*, and the
     # caller still owns both.
     def self.connect(connection : Juggler::Connection, process : Launcher::BrowserProcess? = nil,
-                     timeout : Time::Span = DEFAULT_TIMEOUT) : self
+                     timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil) : self
       browser = new(connection, process)
       begin
-        browser.handshake(timeout)
+        browser.handshake(timeout, proxy)
       rescue ex
         browser.unsubscribe
         raise ex
@@ -131,8 +149,10 @@ module Crystalfaux
     end
 
     # Creates an isolated context. The browser removes it when the pipe
-    # closes.
-    def new_context(timeout : Time::Span = DEFAULT_TIMEOUT) : Context
+    # closes. With a *proxy*, the context's requests go through it instead
+    # of the browser's proxy; when the browser rejects the proxy, the
+    # context is closed and the error raised.
+    def new_context(timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil) : Context
       check_open
       request = Protocol::Browser::CreateBrowserContext.new(remove_on_detach: true)
       id = Protocol.call(@connection, request, timeout: timeout).browser_context_id
@@ -141,6 +161,7 @@ module Crystalfaux
         raise ConnectionClosed.new("Browser is closed") if @closed
         @contexts[id] = context
       end
+      context.use_proxy(proxy, timeout) if proxy
       context
     end
 
@@ -174,10 +195,15 @@ module Crystalfaux
       @lock.synchronize { @closed }
     end
 
-    protected def handshake(timeout : Time::Span) : Nil
+    protected def handshake(timeout : Time::Span, proxy : Proxy?) : Nil
       enable = Protocol::Browser::Enable.new(attach_to_default_context: false,
         user_prefs: [] of Protocol::Browser::UserPreference)
       Protocol.call(@connection, enable, timeout: timeout)
+      if proxy
+        request = Protocol::Browser::SetBrowserProxy.new(proxy.type, proxy.host, proxy.port, proxy.bypass,
+          proxy.username, proxy.password)
+        Protocol.call(@connection, request, timeout: timeout)
+      end
       info = Protocol.call(@connection, Protocol::Browser::GetInfo.new, timeout: timeout)
       @version = info.version
       @user_agent = info.user_agent

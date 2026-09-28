@@ -10,6 +10,7 @@
 # - silent: never print the ready line.
 # - crash: log a message and exit with status 3 before the ready line.
 # - stubborn: print the ready line, then ignore pipe close and SIGTERM.
+# - env: print its CAMOU_* variables, sorted, then behave as echo.
 echo "args: $*"
 case "${FAKE_MODE:-echo}" in
   silent)
@@ -27,6 +28,11 @@ case "${FAKE_MODE:-echo}" in
     trap '' TERM
     echo "Juggler listening to the pipe"
     while :; do sleep 0.05; done
+    ;;
+  env)
+    env | grep '^CAMOU_' | sort
+    echo "Juggler listening to the pipe"
+    exec cat <&3 >&4
     ;;
   *)
     echo "Juggler listening to the pipe"

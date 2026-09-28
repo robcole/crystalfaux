@@ -32,6 +32,20 @@ describe Crystalfaux::Launcher::BrowserProcess do
     browser.try &.close
   end
 
+  it "gives the browser the config chunks but not the CAMOU_* variables of the parent" do
+    ENV["CAMOU_CONFIG_2"] = "stale tail"
+    ENV["CAMOU_PREFS_1"] = "stale prefs"
+    options = fake_options("env").copy_with(config: {"screen.width" => JSON::Any.new(1280_i64)})
+    browser = launch(options)
+
+    browser.log_tail.select(&.starts_with?("CAMOU_"))
+      .should eq([%(CAMOU_CONFIG_1={"screen.width":1280}), "CAMOU_PREFS_1={}"])
+  ensure
+    ENV.delete("CAMOU_CONFIG_2")
+    ENV.delete("CAMOU_PREFS_1")
+    browser.try &.close
+  end
+
   it "sends Browser.close through the connection, closes the pipe and removes the temp profile" do
     record = File.tempname("crystalfaux-frames")
     browser = launch(fake_options("record", FAKE_RECORD: record))

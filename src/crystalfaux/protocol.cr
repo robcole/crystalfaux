@@ -27,8 +27,8 @@ require "json"
 # Only the methods and events that crystalfaux uses are ported. Not ported:
 # the `Heap` and `Accessibility` domains, downloads, video recording and
 # screencasts, dialogs, workers, web sockets, bindings, file choosers, touch
-# events, emulation overrides other than the viewport, proxies, and
-# permissions. Port them from `Protocol.js` when a feature needs them.
+# events, emulation overrides other than the viewport, and permissions.
+# Port them from `Protocol.js` when a feature needs them.
 module Crystalfaux::Protocol
   # A request whose reply decodes to *R*.
   module Request(R)

@@ -146,6 +146,23 @@ module Crystalfaux
       Protocol.call(@browser.connection, Protocol::Browser::ClearCookies.new(@id), timeout: timeout)
     end
 
+    # Sends the context's requests through *proxy*
+    # (`Browser.setContextProxy`). `Browser#new_context` calls it before it
+    # returns the context. When the browser rejects the proxy, closes the
+    # context and raises the error.
+    protected def use_proxy(proxy : Proxy, timeout : Time::Span) : Nil
+      request = Protocol::Browser::SetContextProxy.new(@id, proxy.type, proxy.host, proxy.port, proxy.bypass,
+        proxy.username, proxy.password)
+      Protocol.call(@browser.connection, request, timeout: timeout)
+    rescue ex
+      begin
+        close(timeout)
+      rescue Error
+        # The context is forgotten anyway; the proxy error is the one to report.
+      end
+      raise ex
+    end
+
     # Whether a `#block` rule matches *request*.
     protected def blocks?(request : Request) : Bool
       @lock.synchronize do

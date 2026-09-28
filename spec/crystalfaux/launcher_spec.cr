@@ -25,7 +25,7 @@ describe Crystalfaux::Launcher do
         config: {"navigator.platform" => JSON::Any.new("MacIntel")},
         prefs: {"media.autoplay.default" => JSON::Any.new(0_i64)},
         env: {"MOZ_LOG" => "none"},
-      ))
+      ), base: {} of String => String)
 
       env.should eq({
         "CAMOU_CONFIG_1" => %({"navigator.platform":"MacIntel"}),
@@ -35,13 +35,43 @@ describe Crystalfaux::Launcher do
     end
 
     it "sends empty objects when there is no config or prefs" do
-      Crystalfaux::Launcher.environment(options)
+      Crystalfaux::Launcher.environment(options, base: {} of String => String)
         .should eq({"CAMOU_CONFIG_1" => "{}", "CAMOU_PREFS_1" => "{}"})
     end
 
     it "lets the caller's env override a generated chunk" do
       env = Crystalfaux::Launcher.environment(options(env: {"CAMOU_PREFS_1" => "{\"a\":1}"}))
       env["CAMOU_PREFS_1"].should eq(%({"a":1}))
+    end
+
+    it "starts from the base environment without inherited CAMOU_CONFIG and CAMOU_PREFS variables" do
+      base = {
+        "PATH"           => "/usr/bin",
+        "HOME"           => "/Users/me",
+        "CAMOU_CONFIG"   => %({"stale":true}),
+        "CAMOU_CONFIG_1" => %({"navigator.platform":),
+        "CAMOU_CONFIG_2" => %("Win32"}),
+        "CAMOU_PREFS_1"  => %({"stale":),
+        "CAMOU_PREFS_7"  => "1}",
+        "CAMOUFLAGE"     => "kept",
+      }
+
+      env = Crystalfaux::Launcher.environment(options(config: {"screen.width" => JSON::Any.new(1280_i64)}), base: base)
+
+      env.should eq({
+        "PATH"           => "/usr/bin",
+        "HOME"           => "/Users/me",
+        "CAMOUFLAGE"     => "kept",
+        "CAMOU_CONFIG_1" => %({"screen.width":1280}),
+        "CAMOU_PREFS_1"  => "{}",
+      })
+    end
+
+    it "starts from the process environment by default" do
+      env = Crystalfaux::Launcher.environment(options)
+
+      env["PATH"]?.should eq(ENV["PATH"]?)
+      env.keys.select(&.starts_with?("CAMOU_")).sort!.should eq(["CAMOU_CONFIG_1", "CAMOU_PREFS_1"])
     end
   end
 
@@ -76,7 +106,7 @@ describe Crystalfaux::Launcher do
         config: {"fonts" => JSON::Any.new(text)},
         prefs: {"intl.accept_languages" => JSON::Any.new(text)},
       )
-      env = Crystalfaux::Launcher.environment(options)
+      env = Crystalfaux::Launcher.environment(options, base: {} of String => String)
 
       {"CAMOU_CONFIG" => options.config, "CAMOU_PREFS" => options.prefs}.each do |prefix, source|
         chunks = env.select { |name, _| name.starts_with?("#{prefix}_") }
