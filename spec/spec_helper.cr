@@ -1,5 +1,6 @@
 require "spec"
 require "../src/crystalfaux"
+require "./support/*"
 
 # Specs that need a real Camoufox browser follow this convention:
 #

@@ -2,3 +2,6 @@
 module Crystalfaux
   VERSION = "0.1.0"
 end
+
+require "./crystalfaux/errors"
+require "./crystalfaux/juggler/*"
