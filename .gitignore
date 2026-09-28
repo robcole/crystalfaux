@@ -3,3 +3,4 @@ plans
 /.shards/
 *.dwarf
 /bin/ameba
+/.crystal-cache/

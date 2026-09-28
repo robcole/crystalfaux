@@ -32,3 +32,26 @@ def camoufox_binary : String
   end
   path
 end
+
+# Returns the Crystal compiler cache directory for this checkout and creates
+# it when missing: `CRYSTAL_CACHE_DIR` when set, else `.crystal-cache` in the
+# repository root. `bin/check` and `scripts/spec` export the same default.
+#
+# `crystal spec` and `crystal run` write their executable to one fixed name
+# in the cache (`crystal-run-spec.tmp`), so two compiles that share a cache
+# replace each other's executable. Keep one cache per checkout, and do not
+# run two full compiles at once in one checkout.
+#
+# Every spec that starts a `crystal` child process must pass this directory
+# explicitly. Inheriting the parent environment is not enough when the
+# parent ran with the default cache.
+#
+# ```
+# Process.run("crystal", ["build", "--no-codegen", fixture],
+#   env: {"CRYSTAL_CACHE_DIR" => crystal_cache_dir})
+# ```
+def crystal_cache_dir : String
+  dir = ENV["CRYSTAL_CACHE_DIR"]? || File.expand_path("../.crystal-cache", __DIR__)
+  Dir.mkdir_p(dir)
+  dir
+end
