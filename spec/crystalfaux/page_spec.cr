@@ -107,7 +107,7 @@ describe Crystalfaux::Page do
   end
 
   describe "#evaluate" do
-    it "evaluates in the main world of the main frame and returns the value" do
+    it "evaluates in the default world of the main frame and returns the value" do
       browser, fake = scripted_browser
       page = loaded_page(browser)
       fake.on("Runtime.evaluate") { [ProbeScript.reply_to(&.["params"]["expression"]?.==("[document.title, navigator.webdriver].join(' | ')"))] }
@@ -221,32 +221,6 @@ describe Crystalfaux::Page do
       grandchild.url.should eq("")
       page.main_frame.children.map(&.id).should eq(["grandchild-1"])
       page.main_frame.children.first.should_not be(grandchild)
-    ensure
-      browser.try &.close
-      fake.try &.close
-    end
-
-    it "tracks the main and utility worlds of each frame separately" do
-      browser, fake = scripted_browser
-      page = loaded_page(browser)
-      frame = page.main_frame
-      frame.main_context_id.should eq("id-3")
-      frame.utility_context_id.should be_nil
-
-      fake.event("Runtime.executionContextCreated", {executionContextId: "id-9", auxData: {frameId: ProbeScript::FRAME_ID, name: Page::UTILITY_WORLD}})
-      fake.event("Runtime.executionContextCreated", {executionContextId: "id-10", auxData: {frameId: ProbeScript::FRAME_ID, name: "other-extension"}})
-      page.wait_for_events_for_spec
-      frame.main_context_id.should eq("id-3")
-      frame.utility_context_id.should eq("id-9")
-
-      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
-      page.wait_for_events_for_spec
-      frame.main_context_id.should be_nil
-      frame.utility_context_id.should eq("id-9")
-
-      fake.event("Runtime.executionContextsCleared", nil)
-      page.wait_for_events_for_spec
-      frame.utility_context_id.should be_nil
     ensure
       browser.try &.close
       fake.try &.close

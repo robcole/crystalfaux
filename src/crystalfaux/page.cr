@@ -12,8 +12,13 @@ module Crystalfaux
   # ```
   #
   # The page keeps a live registry of its frames and of each frame's
-  # execution contexts, built from the events of its session
-  # (Playwright `server/firefox/ffPage.ts` does the same).
+  # execution context, built from the events of its session
+  # (Playwright `server/firefox/ffPage.ts` does the same). It tracks only the
+  # default world of each frame, which Camoufox makes an isolated sandbox;
+  # other worlds, such as Playwright's `__playwright_utility_world__`, exist
+  # only after an init script names them, and crystalfaux registers none.
+  # A context is forgotten on `Runtime.executionContextDestroyed` (sent for
+  # each navigation), `Runtime.executionContextsCleared` and frame detach.
   #
   # Ownership and lifecycle:
   #
@@ -33,17 +38,16 @@ module Crystalfaux
   #   comes. Other pages on the connection are not affected.
   # - `Page.crashed` marks the page crashed: waiters, pending requests and
   #   later calls raise `PageCrashed`. `#close` still works.
+  # - An evaluation registers its own `Juggler::Cancellation` under its
+  #   execution context. When the page forgets the context, it cancels the
+  #   evaluation with `ExecutionContextDestroyed`; closing the page, or a
+  #   crash, cancels it with the reason, as for other requests.
   # - The page's `Traffic` follows its network events and runs
   #   `#on_request` and `#on_response` handlers in fibers of their own.
   #   Closing the page, or a crash, drops the handlers and fails
   #   `Response#body` waits with the reason. A handler that is running
   #   then is not stopped, but its request decisions raise the reason.
   class Page
-    # The name of the isolated world whose execution contexts are tracked as
-    # a frame's `utility_context_id`, as in Playwright
-    # (`server/firefox/ffPage.ts`).
-    UTILITY_WORLD = "__playwright_utility_world__"
-
     # Serializes the document with its doctype, as Playwright's
     # `Frame.content` does.
     CONTENT_SCRIPT = <<-JS
@@ -82,6 +86,8 @@ module Crystalfaux
     @main_frame : Frame?
     # The frame of each tracked execution context.
     @context_frames = {} of String => Frame
+    # The cancellations of the running evaluations, by execution context.
+    @evaluations = {} of String => Array(Juggler::Cancellation)
     @ready = false
     @closing = false
     @closed = false
@@ -137,27 +143,50 @@ module Crystalfaux
       end
     end
 
-    # Evaluates *expression* in the main frame, in the page's own world, and
-    # returns its value as JSON. `undefined` becomes JSON `null`; `NaN`,
-    # `Infinity`, `-Infinity` and `-0` become floats.
+    # Evaluates *expression* in the main frame and returns its value as
+    # JSON. See `Frame#evaluate` for *world*, the values and the errors.
+    #
+    # By default the script runs in Camoufox's isolated world: it sees the
+    # DOM, but not the globals of the page's own scripts.
     #
     # ```
+    # # The page ran <script>window.marker = 42</script>.
     # page.evaluate("[screen.width, screen.height]") # => [1512, 982]
+    # page.evaluate("window.marker")                 # => nil
+    # page.evaluate("window.marker", world: :main)   # => 42, with allowMainWorld
     # ```
     #
-    # Raises `EvaluationError` when the script throws, and `Error` when the
-    # main frame has no execution context, for example during a navigation.
-    def evaluate(expression : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
-      deadline = Time.instant + timeout
-      check_usable
-      context_id = main_frame.main_context_id
-      raise Error.new("The main frame of page #{@target_id} has no execution context") unless context_id
-      outcome = call(Protocol::Runtime::Evaluate.new(context_id, expression, return_by_value: true), deadline)
+    # To read page state without the main world, read what the page
+    # writes to the DOM, for example
+    # `page.evaluate("document.querySelector('#state').textContent")`.
+    def evaluate(expression : String, world : World = :isolated,
+                 timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
+      main_frame.evaluate(expression, world, timeout)
+    end
+
+    # Runs `Frame#evaluate` for *frame*, a frame of this page.
+    protected def evaluate_in(frame : Frame, expression : String, world : World, deadline : Time::Instant) : JSON::Any
+      context_id, cancellation = start_evaluation(frame)
+      begin
+        outcome = case world
+                  in .isolated?
+                    call(Protocol::Runtime::Evaluate.new(context_id, expression, return_by_value: true), deadline, cancellation)
+                  in .main?
+                    call(Protocol::Runtime::MainWorld.request(context_id, expression), deadline, cancellation)
+                  end
+      rescue ex : ProtocolError
+        raise evaluation_failure(ex, frame)
+      ensure
+        finish_evaluation(context_id, cancellation)
+      end
       if details = outcome.exception_details
         message = details.text || details.value.try(&.to_json) || "The script threw"
         raise EvaluationError.new(message, details.stack)
       end
-      value_of(outcome.result)
+      case world
+      in .isolated? then value_of(outcome.result)
+      in .main?     then Protocol::Runtime::MainWorld.decode(outcome.result.try(&.value))
+      end
     end
 
     # The title of the main frame's document.
@@ -296,6 +325,7 @@ module Crystalfaux
       subscriptions.each { |subscription| @connection.off(subscription) }
       waiters.each(&.fail(reason))
       @cancellation.cancel(reason)
+      cancel_evaluations(reason)
       @traffic.dispose(reason)
     end
 
@@ -364,7 +394,7 @@ module Crystalfaux
     end
 
     private def evaluate_clip(script : String, deadline : Time::Instant) : Protocol::Page::Clip
-      value = evaluate(script, {deadline - Time.instant, Time::Span.zero}.max)
+      value = evaluate(script, timeout: {deadline - Time.instant, Time::Span.zero}.max)
       Protocol.decode(Protocol::Page::Clip, value)
     end
 
@@ -381,8 +411,54 @@ module Crystalfaux
       Base64.decode(data)
     end
 
+    # Registers an evaluation in *frame*'s execution context and returns
+    # the context and the evaluation's cancellation. Raises the page's
+    # failure, or `ExecutionContextDestroyed` when the frame has no context.
+    private def start_evaluation(frame : Frame) : {String, Juggler::Cancellation}
+      @lock.synchronize do
+        raise_failure
+        context_id = @context_frames.key_for?(frame)
+        raise ExecutionContextDestroyed.new("Frame #{frame.id} has no execution context") unless context_id
+        cancellation = Juggler::Cancellation.new
+        (@evaluations[context_id] ||= [] of Juggler::Cancellation) << cancellation
+        {context_id, cancellation}
+      end
+    end
+
+    private def finish_evaluation(context_id : String, cancellation : Juggler::Cancellation) : Nil
+      @lock.synchronize do
+        cancellations = @evaluations[context_id]?
+        next unless cancellations
+        cancellations.delete(cancellation)
+        @evaluations.delete(context_id) if cancellations.empty?
+      end
+    end
+
+    private def cancel_evaluations(reason : Exception) : Nil
+      cancellations = @lock.synchronize { @evaluations.values.flatten.tap { @evaluations.clear } }
+      cancellations.each(&.cancel(reason))
+    end
+
+    # Translates a protocol error from an evaluation in *frame*. Camoufox
+    # `additions/juggler/content/Runtime.js` fails a pending evaluation with
+    # "Execution context was destroyed!" when a navigation or detach
+    # destroys its context, and "Failed to find execution context" when the
+    # context is gone before the request arrives. `ExecutionContext#_serialize`
+    # fails with "Object is not serializable" for a cycle, and JSON fails
+    # with "can't be serialized" for a `BigInt`.
+    private def evaluation_failure(error : ProtocolError, frame : Frame) : Error
+      reason = error.message.to_s
+      if reason.includes?("Execution context was destroyed") || reason.includes?("Failed to find execution context")
+        context_lost(frame)
+      elsif reason.includes?("not serializable") || reason.includes?("can't be serialized")
+        EvaluationError.new("The result is not serializable as JSON: #{reason}")
+      else
+        error
+      end
+    end
+
     private def evaluate_string(expression : String, timeout : Time::Span) : String
-      value = evaluate(expression, timeout)
+      value = evaluate(expression, timeout: timeout)
       value.as_s? || raise Error.new("Expected a string from #{expression.inspect}, got #{value.to_json}")
     end
 
@@ -415,9 +491,11 @@ module Crystalfaux
     end
 
     # Sends *request* to the page's session. `Request` and `Response` use it.
-    protected def call(request : Protocol::Request(R), deadline : Time::Instant) : R forall R
+    # An evaluation passes its own *cancellation*.
+    protected def call(request : Protocol::Request(R), deadline : Time::Instant,
+                       cancellation : Juggler::Cancellation = @cancellation) : R forall R
       check_usable
-      Protocol.call(@connection, request, @session_id, {deadline - Time.instant, Time::Span.zero}.max, @cancellation)
+      Protocol.call(@connection, request, @session_id, {deadline - Time.instant, Time::Span.zero}.max, cancellation)
     end
 
     private def check_usable : Nil
@@ -476,7 +554,7 @@ module Crystalfaux
     private def frame_attached(event : Protocol::Page::FrameAttached) : Nil
       update do
         parent = frame_for(event.parent_frame_id)
-        frame = Frame.new(event.frame_id, parent, @lock)
+        frame = Frame.new(self, event.frame_id, parent, @lock)
         @frames[frame.id] = frame
         if parent
           parent.add_child(frame)
@@ -499,35 +577,36 @@ module Crystalfaux
     # execution contexts.
     private def forget_frame(frame : Frame) : Nil
       @frames.delete(frame.id)
-      @context_frames.reject! { |_, owner| owner.same?(frame) }
+      @context_frames.select { |_, owner| owner.same?(frame) }.each_key { |context_id| context_destroyed(context_id) }
       frame.child_frames.each { |child| forget_frame(child) }
     end
 
-    # Call with `@lock` held.
+    # Call with `@lock` held. Tracks the default world only: its name is
+    # empty. Other worlds, such as an extension's, are not tracked.
     private def context_created(event : Protocol::Runtime::ExecutionContextCreated) : Nil
       frame = frame_for(event.aux_data.frame_id)
-      return unless frame
-      case event.aux_data.name
-      when nil, ""
-        frame.main_context_id = event.execution_context_id
-      when UTILITY_WORLD
-        frame.utility_context_id = event.execution_context_id
-      else
-        # Another isolated world, such as an extension's; not tracked.
-        return
-      end
+      return unless frame && event.aux_data.name.presence.nil?
+      frame.default_context_id = event.execution_context_id
       @context_frames[event.execution_context_id] = frame
     end
 
-    # Call with `@lock` held.
+    # Call with `@lock` held. Forgets *context_id* and fails the
+    # evaluations that run in it.
     private def context_destroyed(context_id : String) : Nil
-      @context_frames.delete(context_id).try &.clear_context(context_id)
+      frame = @context_frames.delete(context_id)
+      return unless frame
+      frame.clear_context(context_id)
+      @evaluations.delete(context_id).try &.each(&.cancel(context_lost(frame)))
     end
 
     # Call with `@lock` held.
     private def contexts_cleared : Nil
+      @context_frames.keys.each { |context_id| context_destroyed(context_id) }
       @frames.each_value(&.clear_contexts)
-      @context_frames.clear
+    end
+
+    private def context_lost(frame : Frame) : ExecutionContextDestroyed
+      ExecutionContextDestroyed.new("The execution context of frame #{frame.id} was destroyed")
     end
 
     private def crash : Nil
@@ -540,6 +619,7 @@ module Crystalfaux
       end
       waiters.each(&.fail(failure))
       @cancellation.cancel(failure)
+      cancel_evaluations(failure)
       @traffic.dispose(failure)
     end
   end

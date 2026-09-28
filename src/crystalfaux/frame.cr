@@ -20,11 +20,10 @@ module Crystalfaux
 
     @url = ""
     @children = [] of Frame
-    @main_context_id : String?
-    @utility_context_id : String?
+    @default_context_id : String?
 
     # :nodoc:
-    def initialize(@id : String, @parent : Frame?, @lock : Sync::Mutex)
+    def initialize(@page : Page, @id : String, @parent : Frame?, @lock : Sync::Mutex)
     end
 
     # The URL of the frame's document; empty until its first navigation
@@ -38,21 +37,56 @@ module Crystalfaux
       @lock.synchronize { @children.dup }
     end
 
-    # :nodoc:
+    # Evaluates *expression* in this frame and returns its value as JSON.
     #
-    # The execution context of the page's own scripts in this frame, used by
-    # `Page#evaluate`. `nil` between documents.
-    def main_context_id : String?
-      @lock.synchronize { @main_context_id }
+    # ```
+    # frame.evaluate("document.title")              # => "Example Domain"
+    # frame.evaluate("window.marker")               # => nil
+    # frame.evaluate("window.marker", world: :main) # => 42
+    # ```
+    #
+    # *world* selects where the script runs (see `World`):
+    #
+    # - `World::Isolated` (the default) is Camoufox's sandbox. It sees the
+    #   DOM, but not the globals of the page's own scripts.
+    # - `World::Main` is the world of the page's scripts. It needs the launch
+    #   config key `allowMainWorld` set to `true`; without it, the call
+    #   raises `EvaluationError`.
+    #
+    # When the script returns a promise, the call waits for it. Values
+    # become JSON:
+    #
+    # - `undefined` and `null` become `nil`. In the isolated world,
+    #   `undefined` values in objects are left out, and in arrays become
+    #   `nil`.
+    # - `NaN`, `Infinity`, `-Infinity` and `-0` become floats.
+    # - Objects and arrays keep their nesting. Functions and symbols
+    #   become `nil`.
+    # - A `Date` becomes `{}` in the isolated world and its ISO string in the
+    #   main world; return `date.toISOString()` for the same value in both.
+    #   A DOM node becomes `{}` in the isolated world and `"ref: <Node>"` in
+    #   the main world. `Map`, `Set` and `RegExp` do not keep their contents
+    #   in the isolated world.
+    #
+    # Raises `EvaluationError` with the message and stack when the script
+    # throws or its promise rejects, and when the value holds a cycle or a
+    # `BigInt`. Raises `ExecutionContextDestroyed` when the frame has no
+    # execution context or loses it before the script returns, for example
+    # during a navigation or after the frame was detached, and
+    # `TimeoutError` after *timeout*.
+    def evaluate(expression : String, world : World = :isolated,
+                 timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
+      @page.evaluate_in(self, expression, world, Time.instant + timeout)
     end
 
     # :nodoc:
     #
-    # The execution context of the isolated world named
-    # `Page::UTILITY_WORLD` in this frame, kept apart from the page's own
-    # scripts. Not used yet.
-    def utility_context_id : String?
-      @lock.synchronize { @utility_context_id }
+    # The execution context of this frame's default world, which Camoufox
+    # makes the isolated sandbox (`additions/juggler/content/FrameTree.js`,
+    # `_createIsolatedContext`). Main-world requests go through it too.
+    # `nil` between documents and after the frame was detached.
+    def default_context_id : String?
+      @lock.synchronize { @default_context_id }
     end
 
     # The methods below change the frame. `Page` calls them with the lock
@@ -73,21 +107,16 @@ module Crystalfaux
       @children
     end
 
-    protected def main_context_id=(@main_context_id : String?) : String?
+    protected def default_context_id=(@default_context_id : String?) : String?
     end
 
-    protected def utility_context_id=(@utility_context_id : String?) : String?
-    end
-
-    # Forgets *context_id* in whichever world holds it.
+    # Forgets *context_id* if it is this frame's context.
     protected def clear_context(context_id : String) : Nil
-      @main_context_id = nil if @main_context_id == context_id
-      @utility_context_id = nil if @utility_context_id == context_id
+      @default_context_id = nil if @default_context_id == context_id
     end
 
     protected def clear_contexts : Nil
-      @main_context_id = nil
-      @utility_context_id = nil
+      @default_context_id = nil
     end
   end
 end

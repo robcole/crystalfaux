@@ -43,7 +43,8 @@ module Crystalfaux
   class NavigationError < Error
   end
 
-  # Raised when a script that `Page#evaluate` runs throws.
+  # Raised when a script that `Frame#evaluate` or `Page#evaluate` runs
+  # throws, or returns a value that JSON cannot carry.
   #
   # ```
   # page.evaluate("throw new Error('boom')")
@@ -56,6 +57,13 @@ module Crystalfaux
     def initialize(message : String, @stack : String? = nil)
       super(message)
     end
+  end
+
+  # Raised by `Frame#evaluate` and `Page#evaluate` when the frame has no
+  # execution context, or its context is destroyed before the script
+  # returns: by a navigation, or because the frame was detached. Evaluate
+  # again after the navigation.
+  class ExecutionContextDestroyed < Error
   end
 
   # Raised by a page, and by its waiting calls, after the page crashed.
