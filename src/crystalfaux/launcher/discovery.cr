@@ -48,6 +48,21 @@ module Crystalfaux::Launcher
       newest_install(cache_dir, relative_executable)
     end
 
+    # Returns the install directory of *executable*: the directory that
+    # holds `version.json`. That is the directory above *relative_executable*
+    # when the path ends with it, and the executable's directory otherwise.
+    #
+    # ```
+    # Discovery.install_dir("/cache/152.0.4-beta.31-7b8d12d6/Camoufox.app/Contents/MacOS/camoufox")
+    # # => Path["/cache/152.0.4-beta.31-7b8d12d6"]
+    # ```
+    def self.install_dir(executable : String, relative_executable : String = EXECUTABLE) : Path
+      path = Path[executable]
+      relative = Path[relative_executable].parts
+      return path.parent unless path.parts.last(relative.size) == relative && path.parts.size > relative.size
+      Path[path.parts[0...-relative.size]]
+    end
+
     # Returns the directory that holds one subdirectory per Camoufox install,
     # as `platformdirs.user_cache_dir("camoufox")` in the Python package.
     def self.cache_dir(env : Hash(String, String) = ENV.to_h, home : Path = Path.home) : Path

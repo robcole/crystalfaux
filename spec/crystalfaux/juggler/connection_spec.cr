@@ -266,6 +266,36 @@ describe Crystalfaux::Juggler::Connection do
     end
   end
 
+  describe "#on_close" do
+    it "calls the handler once when the peer closes the pipe" do
+      connection, peer = connected_pair
+      calls = Channel(Nil).new(2)
+      connection.on_close { calls.send(nil) }
+
+      peer.close
+      receive_within(calls)
+      connection.close
+
+      quiet?(calls).should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "calls the handler at once when the connection is already closed" do
+      connection, peer = connected_pair
+      connection.close
+      called = false
+
+      connection.on_close { called = true }
+
+      called.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
   describe "disconnect" do
     it "fails every pending call with ConnectionClosed at end of stream" do
       connection, peer = connected_pair

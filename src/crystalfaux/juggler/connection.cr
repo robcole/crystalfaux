@@ -38,6 +38,7 @@ module Crystalfaux::Juggler
     @pending = {} of Int64 => Channel(JSON::Any)
     @subscriptions = {} of {String?, String} => Array(Subscription)
     @closed = false
+    @close_handlers = [] of ->
     # Unbuffered, so a completed send means the writer has started the frame.
     @outbox = Channel(Outgoing).new
 
@@ -126,20 +127,43 @@ module Crystalfaux::Juggler
       end
     end
 
-    # Fails every pending call with `ConnectionClosed` and closes the
-    # transport. Safe to call more than once.
+    # Calls the block once when the connection closes, whether `#close` was
+    # called or the pipe broke or reached end of stream. Calls it at once when
+    # the connection is already closed.
+    #
+    # The block runs on the fiber that closes the connection, after pending
+    # calls have failed. It must not wait on `#call`. An exception from the
+    # block is logged.
+    def on_close(&handler : ->) : Nil
+      already_closed = @lock.synchronize do
+        @close_handlers << handler unless @closed
+        @closed
+      end
+      run_close_handler(handler) if already_closed
+    end
+
+    # Fails every pending call with `ConnectionClosed`, closes the transport
+    # and runs the `#on_close` handlers. Safe to call more than once; the
+    # handlers run only the first time.
     def close : Nil
-      pending = @lock.synchronize do
+      pending, handlers = @lock.synchronize do
         @closed = true
-        @pending.values.tap { @pending.clear }
+        {@pending.values.tap { @pending.clear }, @close_handlers.dup.tap { @close_handlers.clear }}
       end
       pending.each(&.close)
       @outbox.close
       @transport.close
+      handlers.each { |handler| run_close_handler(handler) }
     end
 
     def closed? : Bool
       @lock.synchronize { @closed }
+    end
+
+    private def run_close_handler(handler : ->) : Nil
+      handler.call
+    rescue ex
+      Log.error(exception: ex) { "Juggler close handler raised" }
     end
 
     private def register_request : {Int64, Channel(JSON::Any)}

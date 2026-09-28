@@ -19,6 +19,11 @@ class JugglerPeer
     end
   end
 
+  # Blocks until the next request arrives; returns `nil` at end of stream.
+  def receive? : JSON::Any?
+    @transport.receive.try { |frame| JSON.parse(frame) }
+  end
+
   def reply(id : JSON::Any, result, session_id : String? = nil) : Nil
     write({"id" => id, "result" => result, "sessionId" => session_id})
   end

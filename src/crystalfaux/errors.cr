@@ -37,4 +37,33 @@ module Crystalfaux
   # does not support, or no readable `version.json`.
   class UnsupportedBrowserError < Error
   end
+
+  # Raised when a navigation fails before its document commits, for example
+  # when another navigation replaces it.
+  class NavigationError < Error
+  end
+
+  # Raised when a script that `Page#evaluate` runs throws.
+  #
+  # ```
+  # page.evaluate("throw new Error('boom')")
+  # # raises Crystalfaux::EvaluationError: "boom"
+  # ```
+  class EvaluationError < Error
+    # The JavaScript stack of the thrown `Error`, if the script threw one.
+    getter stack : String?
+
+    def initialize(message : String, @stack : String? = nil)
+      super(message)
+    end
+  end
+
+  # Raised by a page, and by its waiting calls, after the page crashed.
+  class PageCrashed < Error
+  end
+
+  # Raised by a page, and by its waiting calls, after the page or its
+  # context was closed.
+  class PageClosed < Error
+  end
 end

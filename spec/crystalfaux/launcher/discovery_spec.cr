@@ -96,6 +96,20 @@ describe Crystalfaux::Launcher::Discovery do
     end
   end
 
+  describe ".install_dir" do
+    it "strips the install-relative executable path" do
+      Discovery.install_dir("/cache/152.0.4-beta.31-7b8d12d6/Camoufox.app/Contents/MacOS/camoufox",
+        "Camoufox.app/Contents/MacOS/camoufox").should eq(Path["/cache/152.0.4-beta.31-7b8d12d6"])
+      Discovery.install_dir("/cache/152.0.4-beta.31-7b8d12d6/camoufox", "camoufox")
+        .should eq(Path["/cache/152.0.4-beta.31-7b8d12d6"])
+    end
+
+    it "uses the executable's directory for another layout" do
+      Discovery.install_dir("/opt/build/firefox", "Camoufox.app/Contents/MacOS/camoufox")
+        .should eq(Path["/opt/build"])
+    end
+  end
+
   describe ".cache_dir" do
     it "follows the per-OS cache location" do
       {% if flag?(:darwin) %}
