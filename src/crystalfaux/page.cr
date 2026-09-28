@@ -1,3 +1,5 @@
+require "base64"
+
 module Crystalfaux
   # A browser tab: one Juggler page target with its own session.
   #
@@ -48,6 +50,22 @@ module Crystalfaux
       })()
       JS
 
+    # The visible part of the document, where it is scrolled to.
+    VIEWPORT_SCRIPT = "({x: window.scrollX, y: window.scrollY, width: window.innerWidth, height: window.innerHeight})"
+
+    # The size of the whole document, as Playwright's
+    # `server/screenshotter.ts` measures it.
+    DOCUMENT_SCRIPT = <<-JS
+      (() => {
+        const body = document.body, root = document.documentElement;
+        return {
+          x: 0, y: 0,
+          width: Math.max(body.scrollWidth, root.scrollWidth, body.offsetWidth, root.offsetWidth, body.clientWidth, root.clientWidth),
+          height: Math.max(body.scrollHeight, root.scrollHeight, body.offsetHeight, root.offsetHeight, body.clientHeight, root.clientHeight),
+        };
+      })()
+      JS
+
     # The context the page belongs to.
     getter context : Context
 
@@ -67,6 +85,8 @@ module Crystalfaux
     @waiters = [] of Waiter
     @subscriptions = [] of Juggler::Subscription
     @cancellation = Juggler::Cancellation.new
+    @keyboard : Keyboard?
+    @mouse : Mouse?
 
     # :nodoc:
     #
@@ -138,6 +158,58 @@ module Crystalfaux
     # The HTML of the main frame's document, with its doctype.
     def content(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : String
       evaluate_string(CONTENT_SCRIPT, timeout)
+    end
+
+    # The keyboard of the page.
+    def keyboard : Keyboard
+      @lock.synchronize { @keyboard ||= Keyboard.new(self) }
+    end
+
+    # The mouse of the page. Its events carry the modifier keys that
+    # `#keyboard` holds.
+    def mouse : Mouse
+      keyboard = self.keyboard
+      @lock.synchronize { @mouse ||= Mouse.new(self, keyboard) }
+    end
+
+    # Takes a screenshot of the visible viewport and returns the image.
+    #
+    # With *full_page*, takes the whole document instead. *quality* (0 to
+    # 100) is for JPEG and WebP only.
+    #
+    # ```
+    # File.write("page.png", page.screenshot(full_page: true))
+    # ```
+    def screenshot(*, format : Protocol::Page::ImageType = :png, quality : Int32? = nil,
+                   full_page : Bool = false, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Bytes
+      deadline = Time.instant + timeout
+      check_quality(format, quality)
+      clip = evaluate_clip(full_page ? DOCUMENT_SCRIPT : VIEWPORT_SCRIPT, deadline)
+      capture(format, quality, clip, deadline)
+    end
+
+    # Takes a screenshot of *clip*, a rectangle in CSS pixels from the
+    # top-left corner of the document, and returns the image.
+    #
+    # ```
+    # clip = Crystalfaux::Protocol::Page::Clip.new(0, 0, 400, 300)
+    # page.screenshot(format: :jpeg, quality: 80, clip: clip)
+    # ```
+    def screenshot(*, clip : Protocol::Page::Clip, format : Protocol::Page::ImageType = :png,
+                   quality : Int32? = nil, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Bytes
+      check_quality(format, quality)
+      capture(format, quality, clip, Time.instant + timeout)
+    end
+
+    # Sets the size of the viewport in CSS pixels.
+    def set_viewport_size(width : Int32, height : Int32, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+      size = Protocol::Page::Size.new(width.to_f, height.to_f)
+      call(Protocol::Page::SetViewportSize.new(size), Time.instant + timeout)
+    end
+
+    # Sends one input event for `Keyboard` or `Mouse`.
+    protected def dispatch(event : Protocol::Request(Protocol::Empty)) : Nil
+      call(event, Time.instant + Browser::DEFAULT_TIMEOUT)
     end
 
     # Closes the page. Safe to call more than once, and on a crashed page.
@@ -232,6 +304,24 @@ module Crystalfaux
           false
         end
       end
+    end
+
+    private def evaluate_clip(script : String, deadline : Time::Instant) : Protocol::Page::Clip
+      value = evaluate(script, {deadline - Time.instant, Time::Span.zero}.max)
+      Protocol.decode(Protocol::Page::Clip, value)
+    end
+
+    private def check_quality(format : Protocol::Page::ImageType, quality : Int32?) : Nil
+      return unless quality
+      raise ArgumentError.new("A #{format.wire_name} screenshot takes no quality") if format.png?
+      raise ArgumentError.new("Screenshot quality must be 0 to 100, not #{quality}") unless 0 <= quality <= 100
+    end
+
+    # Takes the screenshot of *clip*, in document coordinates.
+    private def capture(format : Protocol::Page::ImageType, quality : Int32?, clip : Protocol::Page::Clip,
+                        deadline : Time::Instant) : Bytes
+      data = call(Protocol::Page::Screenshot.new(format, clip, quality: quality), deadline).data
+      Base64.decode(data)
     end
 
     private def evaluate_string(expression : String, timeout : Time::Span) : String
