@@ -10,9 +10,11 @@ private def launch(options : Crystalfaux::Launcher::Options, timeout : Time::Spa
   Crystalfaux::Launcher::BrowserProcess.launch(options, timeout: timeout)
 end
 
-# Returns the profile directories the launcher created in the temp dir.
+# Returns the profile directories this spec process created in the temp dir.
+# It matches on the pid that File.tempname puts in the name, because spec runs
+# in other checkouts share Dir.tempdir.
 private def launcher_profiles : Array(String)
-  Dir.glob(File.join(Dir.tempdir, "*crystalfaux-profile*"))
+  Dir.glob(File.join(Dir.tempdir, "*-#{Process.pid}-*crystalfaux-profile*"))
 end
 
 describe Crystalfaux::Launcher::BrowserProcess do
