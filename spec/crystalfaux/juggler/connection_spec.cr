@@ -15,6 +15,7 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(outcome).should eq(JSON.parse(%({"navigationId":"nav-1"})))
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "sends root-session requests without sessionId and with empty params" do
@@ -29,6 +30,7 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(outcome).should eq(JSON.parse(%({"version":"Firefox/152.0.4"})))
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "uses increasing ids and matches replies that arrive out of order" do
@@ -46,6 +48,7 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(second).should eq(JSON.parse(%({"value":2})))
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "raises ProtocolError when the reply carries an error" do
@@ -59,6 +62,7 @@ describe Crystalfaux::Juggler::Connection do
       error.message.should eq("Protocol error (Browser.setDefaultViewport): Invalid parameters")
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "raises TimeoutError when no reply arrives in time and ignores a late reply" do
@@ -75,13 +79,17 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(next_call).should eq(JSON.parse(%({"on_time":true})))
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "raises ConnectionClosed after the connection is closed" do
-      connection, _peer = connected_pair
+      connection, peer = connected_pair
       connection.close
 
       expect_raises(Crystalfaux::ConnectionClosed) { connection.call("Browser.getInfo") }
+    ensure
+      connection.try &.close
+      peer.try &.close
     end
   end
 
@@ -103,6 +111,7 @@ describe Crystalfaux::Juggler::Connection do
       quiet?(page).should be_true
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "handles events that arrive before a reply before the call returns" do
@@ -119,6 +128,7 @@ describe Crystalfaux::Juggler::Connection do
       attached.should eq(["s1"])
     ensure
       connection.try &.close
+      peer.try &.close
     end
 
     it "keeps dispatching after a handler raises" do
@@ -136,6 +146,7 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(names).should eq("load")
     ensure
       connection.try &.close
+      peer.try &.close
     end
   end
 
@@ -153,6 +164,7 @@ describe Crystalfaux::Juggler::Connection do
       quiet?(names).should be_true
     ensure
       connection.try &.close
+      peer.try &.close
     end
   end
 
@@ -169,6 +181,9 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(first).should be_a(Crystalfaux::ConnectionClosed)
       receive_within(second).should be_a(Crystalfaux::ConnectionClosed)
       connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
     end
 
     it "fails every pending call with ConnectionClosed when closed locally" do
@@ -179,6 +194,9 @@ describe Crystalfaux::Juggler::Connection do
       connection.close
 
       receive_within(outcome).should be_a(Crystalfaux::ConnectionClosed)
+    ensure
+      connection.try &.close
+      peer.try &.close
     end
 
     it "skips a frame that is not valid JSON and keeps reading" do
@@ -192,6 +210,44 @@ describe Crystalfaux::Juggler::Connection do
       receive_within(outcome).should eq(JSON.parse(%({"ok":true})))
     ensure
       connection.try &.close
+      peer.try &.close
+    end
+
+    it "times out a write the peer never reads and fails the call queued behind it" do
+      connection, peer = connected_pair
+      # Far larger than a pipe buffer, so the write blocks while the peer is
+      # open but not reading.
+      blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, timeout: 50.milliseconds) }
+      Fiber.yield
+      queued = async { connection.call("Browser.getInfo", timeout: 5.seconds) }
+
+      receive_within(blocked).should be_a(Crystalfaux::TimeoutError)
+      receive_within(queued).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "fails every pending call when the request pipe breaks" do
+      request_reader, request_writer = IO.pipe
+      reply_reader, reply_writer = IO.pipe
+      io = IO::Stapled.new(reply_reader, request_writer, sync_close: true)
+      connection = Crystalfaux::Juggler::Connection.new(Crystalfaux::Juggler::Transport.new(io))
+      pending = async { connection.call("Browser.getInfo") }
+      request_reader.gets('\0').should_not be_nil
+
+      # The browser closes its request fd but keeps its reply fd open.
+      request_reader.close
+      failed = async { connection.call("Browser.newPage") }
+
+      receive_within(failed).should be_a(Crystalfaux::ConnectionClosed)
+      receive_within(pending).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      request_reader.try &.close
+      reply_writer.try &.close
     end
   end
 end

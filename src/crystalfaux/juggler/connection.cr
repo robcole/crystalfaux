@@ -20,10 +20,12 @@ module Crystalfaux::Juggler
   # connection.close
   # ```
   #
-  # Fiber lifecycle: `.new` starts one reader fiber. It reads frames until the
-  # transport reaches end of stream or is closed, then disconnects: pending
-  # calls raise `ConnectionClosed` and the transport is closed. Frames that
-  # arrive after that are not read.
+  # Fiber lifecycle: `.new` starts a reader fiber and a writer fiber. The
+  # reader reads frames until the transport reaches end of stream or is
+  # closed. The writer writes one request frame at a time until the
+  # connection closes or a write fails. When either fiber stops, the
+  # connection disconnects: pending calls raise `ConnectionClosed` and the
+  # transport is closed. Frames that arrive after that are not read.
   #
   # The connection owns the transport: `#close` closes it.
   class Connection
@@ -36,9 +38,12 @@ module Crystalfaux::Juggler
     @pending = {} of Int64 => Channel(JSON::Any)
     @subscriptions = {} of {String?, String} => Array(Subscription)
     @closed = false
+    # Unbuffered, so a completed send means the writer has started the frame.
+    @outbox = Channel(Outgoing).new
 
     def initialize(@transport : Transport)
       spawn(name: "juggler-reader") { read_frames }
+      spawn(name: "juggler-writer") { write_frames }
     end
 
     # Sends *method* with *params* to *session_id* (the root session when
@@ -46,15 +51,22 @@ module Crystalfaux::Juggler
     #
     # *params* is any value that serializes to a JSON object; `nil` sends `{}`.
     # Raises `ProtocolError` when the reply carries an error, `TimeoutError`
-    # when no reply arrives within *timeout*, and `ConnectionClosed` when the
-    # connection is or becomes closed. A reply that arrives after the timeout
-    # is dropped.
+    # when the request is not written and answered within *timeout*, and
+    # `ConnectionClosed` when the connection is or becomes closed. A reply
+    # that arrives after the timeout is dropped.
+    #
+    # The timeout also covers waiting for the writer and the write itself.
+    # When it expires before the request frame is fully written, the
+    # connection closes, because a partial frame corrupts the framing of
+    # every later message.
     def call(method : String, params : (JSON::Serializable | Hash | NamedTuple | JSON::Any)? = nil,
              session_id : String? = nil, timeout : Time::Span = DEFAULT_TIMEOUT) : JSON::Any
+      deadline = Time.instant + timeout
       id, reply = register_request
+      request = Outgoing.new(encode(id, method, params, session_id))
       begin
-        @transport.send(encode(id, method, params, session_id))
-        message = await(reply, method, timeout)
+        hand_off(request, method, timeout, deadline)
+        message = await(reply, request, method, timeout, deadline)
       ensure
         @lock.synchronize { @pending.delete(id) }
       end
@@ -95,6 +107,7 @@ module Crystalfaux::Juggler
         @pending.values.tap { @pending.clear }
       end
       pending.each(&.close)
+      @outbox.close
       @transport.close
     end
 
@@ -126,13 +139,34 @@ module Crystalfaux::Juggler
       end
     end
 
-    private def await(reply : Channel(JSON::Any), method : String, timeout : Time::Span) : JSON::Any
+    private def hand_off(request : Outgoing, method : String, timeout : Time::Span, deadline : Time::Instant) : Nil
+      select
+      when @outbox.send(request)
+      when timeout(remaining(deadline))
+        # The writer never took the request, so no bytes of it were written.
+        raise timed_out(method, timeout)
+      end
+    rescue Channel::ClosedError
+      raise ConnectionClosed.new("Juggler connection closed before #{method} was sent")
+    end
+
+    private def await(reply : Channel(JSON::Any), request : Outgoing, method : String,
+                      timeout : Time::Span, deadline : Time::Instant) : JSON::Any
       select
       when message = reply.receive?
         message || raise ConnectionClosed.new("Juggler connection closed while waiting for #{method}")
-      when timeout(timeout)
-        raise TimeoutError.new("#{method} timed out after #{timeout}")
+      when timeout(remaining(deadline))
+        close unless request.written?
+        raise timed_out(method, timeout)
       end
+    end
+
+    private def remaining(deadline : Time::Instant) : Time::Span
+      {deadline - Time.instant, Time::Span.zero}.max
+    end
+
+    private def timed_out(method : String, timeout : Time::Span) : TimeoutError
+      TimeoutError.new("#{method} timed out after #{timeout}")
     end
 
     private def result_of(method : String, message : JSON::Any) : JSON::Any
@@ -141,6 +175,17 @@ module Crystalfaux::Juggler
         raise ProtocolError.new(method, reason)
       end
       message["result"]? || JSON::Any.new(nil)
+    end
+
+    private def write_frames : Nil
+      while request = @outbox.receive?
+        @transport.send(request.frame)
+        request.written = true
+      end
+    rescue ConnectionClosed
+      # The pipe is broken; no later request can be written either.
+    ensure
+      close
     end
 
     private def read_frames : Nil
@@ -174,6 +219,23 @@ module Crystalfaux::Juggler
         subscription.handler.call(params)
       rescue ex
         Log.error(exception: ex) { "Juggler event handler for #{method} raised" }
+      end
+    end
+
+    # A request frame and whether the writer has finished writing it.
+    private class Outgoing
+      getter frame : String
+      @written = Atomic(Bool).new(false)
+
+      def initialize(@frame : String)
+      end
+
+      def written? : Bool
+        @written.get
+      end
+
+      def written=(value : Bool) : Bool
+        @written.set(value)
       end
     end
   end
