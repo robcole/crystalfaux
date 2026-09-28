@@ -3,10 +3,12 @@ module Crystalfaux::Fingerprint
   # desktop. A page can read all of them, so an impossible combination, such
   # as a window wider than its screen, marks the browser as spoofed.
   #
-  # Ported from Camoufox `pythonlib/camoufox/fingerprints.py` (MPL-2.0):
+  # Ported from Camoufox `pythonlib/camoufox/fingerprints.py`:
   # `fix_screen_no_taskbar`, `clamp_window_dimensions` and
   # `clamp_window_position`, applied in that order as `launch_options()`
-  # does. Keys that are absent stay absent.
+  # does. Keys that are absent stay absent. That file belongs to the Python
+  # package, which `pythonlib/pyproject.toml` declares MIT, in a repository
+  # whose root `LICENSE` is MPL-2.0; `data/camoufox/README.md` records both.
   module Geometry
     AXES = {"Width", "Height"}
 

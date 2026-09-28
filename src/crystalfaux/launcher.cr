@@ -46,6 +46,17 @@ module Crystalfaux::Launcher
   #
   # The prefs must travel here, not in `Browser.enable`: `camoufox.cfg`
   # applies them at startup, before Firefox caches some of them.
+  #
+  # Migration: earlier versions of this method returned only the variables to
+  # add (the chunks and `options.env`), and the child inherited the rest.
+  # It now returns the complete child environment, and `BrowserProcess`
+  # spawns with `clear_env: true`. A caller that wants the old override
+  # map passes an empty base:
+  #
+  # ```
+  # Crystalfaux::Launcher.environment(options, base: {} of String => String)
+  # # => {"CAMOU_CONFIG_1" => "{}", "CAMOU_PREFS_1" => "{}"}
+  # ```
   def self.environment(options : Options, base : Hash(String, String) = ENV.to_h) : Hash(String, String)
     base.reject { |name, _| RESERVED_PREFIXES.any? { |prefix| name.starts_with?(prefix) } }
       .merge!(chunk("CAMOU_CONFIG", options.config.to_json))

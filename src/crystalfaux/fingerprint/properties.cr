@@ -14,8 +14,8 @@ module Crystalfaux::Fingerprint
 
       # Whether *value* has this type, as `validate_type` in Camoufox
       # `pythonlib/camoufox/utils.py`, except that `true` and `false` are not
-      # numbers here. An integer type accepts a float with no fraction,
-      # because JSON does not tell them apart.
+      # numbers here. An integer type accepts a float with no fraction that
+      # fits in an `Int64`; `#normalize` turns it into an integer.
       def matches?(value : JSON::Any) : ::Bool
         raw = value.raw
         case self
@@ -29,13 +29,28 @@ module Crystalfaux::Fingerprint
         end
       end
 
+      # Returns *value* in the form that Camoufox reads for this type: an
+      # integer type turns a float with no fraction into an integer. Call it
+      # on a value that `#matches?`.
+      #
+      # `MaskConfig.hpp` reads an integer key only when the JSON number is
+      # an integer (`is_number_integer()`, `is_number_unsigned()`), so
+      # `8.0` would be ignored and the host's real value would show. A
+      # double key accepts integers, so it stays as given.
+      def normalize(value : JSON::Any) : JSON::Any
+        raw = value.raw
+        return value unless (int? || uint?) && raw.is_a?(Float64)
+        JSON::Any.new(raw.to_i64)
+      end
+
       # The name of the type in `properties.json`, for example `"uint"`.
       def json_name : ::String
         to_s.downcase
       end
 
       private def integral?(raw) : ::Bool
-        raw.is_a?(Int64) || (raw.is_a?(Float64) && raw.finite? && raw == raw.trunc)
+        return true if raw.is_a?(Int64)
+        raw.is_a?(Float64) && raw == raw.trunc && raw >= Int64::MIN.to_f && raw < Int64::MAX.to_f
       end
 
       private def non_negative?(raw) : ::Bool

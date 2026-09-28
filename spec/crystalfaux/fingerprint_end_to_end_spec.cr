@@ -41,6 +41,17 @@ describe "fingerprint configs and proxies", tags: "browser" do
     browser.try &.close
   end
 
+  it "applies an integer key given as an integer-valued float" do
+    config = Crystalfaux::Fingerprint::Config.from_json(%({"navigator.hardwareConcurrency": 3.0}))
+    browser = Crystalfaux::Browser.launch(config: config,
+      options: Crystalfaux::Launcher::Options.new(executable: camoufox_binary))
+    page = browser.new_context.new_page
+
+    page.evaluate("navigator.hardwareConcurrency").should eq(JSON::Any.new(3_i64))
+  ensure
+    browser.try &.close
+  end
+
   it "sends the requests of a context through its proxy" do
     binary = camoufox_binary
     proxy = ForwardProxy.new

@@ -28,6 +28,23 @@ describe Crystalfaux::Fingerprint::Config do
       config["timezone"]?.should be_nil
     end
 
+    it "writes an integer-valued float of an integer key as a JSON integer, as MaskConfig reads it" do
+      config = Config.from_json(<<-JSON)
+        {"navigator.hardwareConcurrency": 8.0, "window.screenX": -4.0,
+         "window.devicePixelRatio": 2.0, "screen.width": 1512}
+        JSON
+
+      config["navigator.hardwareConcurrency"].raw.should be_a(Int64)
+      config.to_json.should eq(%({"navigator.hardwareConcurrency":8,"window.screenX":-4,) +
+                               %("window.devicePixelRatio":2.0,"screen.width":1512}))
+    end
+
+    it "rejects an integer-valued float outside the Int64 range" do
+      expect_raises(Crystalfaux::ConfigError, /navigator\.hardwareConcurrency.*uint/) do
+        Config.from_json(%({"navigator.hardwareConcurrency": 1e30}))
+      end
+    end
+
     it "rejects a key that properties.json does not list" do
       expect_raises(Crystalfaux::ConfigError, /Unknown config key "screen\.depth"/) do
         Config.from_json(%({"screen.width": 1512, "screen.depth": 24}))
@@ -82,6 +99,44 @@ describe Crystalfaux::Fingerprint::Config do
       config.to_h["screen.height"] = JSON::Any.new(1_i64)
 
       config.to_h.should eq({"screen.width" => JSON::Any.new(1280_i64)})
+    end
+  end
+
+  describe "immutability" do
+    it "keeps nested values when the caller changes the input" do
+      voices = [JSON::Any.new(voice)]
+      values = {"voices" => JSON::Any.new(voices), "fonts" => JSON.parse(%(["Arial"]))}
+      config = Config.new(values)
+      before = config.to_json
+
+      voices[0].as_h.delete("voiceUri")
+      values["fonts"].as_a << JSON::Any.new(1_i64)
+
+      config.to_json.should eq(before)
+    end
+
+    it "keeps nested values when the caller changes what an accessor returned" do
+      config = Config.new({"voices" => JSON::Any.new([JSON::Any.new(voice)]), "fonts" => JSON.parse(%(["Arial"]))})
+      before = config.to_json
+
+      config["voices"].as_a << JSON::Any.new("invalid")
+      config["voices"][0].as_h.delete("voiceUri")
+      config["fonts"]?.try(&.as_a.clear)
+      config.to_h["voices"].as_a.clear
+
+      config.to_json.should eq(before)
+    end
+
+    it "shares no nested values between a config and its merge or copy" do
+      config = Config.new({"fonts" => JSON.parse(%(["Arial"]))})
+      merged = config.merge({"timezone" => JSON::Any.new("UTC")})
+      copy = config
+
+      merged["fonts"].as_a << JSON::Any.new("Menlo")
+      copy["fonts"].as_a << JSON::Any.new("Menlo")
+
+      config.to_json.should eq(%({"fonts":["Arial"]}))
+      merged.to_json.should eq(%({"fonts":["Arial"],"timezone":"UTC"}))
     end
   end
 

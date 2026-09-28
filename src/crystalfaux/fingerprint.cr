@@ -17,7 +17,8 @@ module Crystalfaux
   # ```
   #
   # The key list and the per-OS font lists are vendored in `data/camoufox/`
-  # from the Camoufox commit of `protocol/Protocol.js` (MPL-2.0).
+  # from the Camoufox commit of `protocol/Protocol.js`. Its `README.md`
+  # records the licence metadata of each file.
   module Fingerprint
     # A width and height in CSS pixels.
     record Screen, width : Int32, height : Int32

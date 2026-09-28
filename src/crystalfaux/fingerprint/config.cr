@@ -18,7 +18,9 @@ module Crystalfaux::Fingerprint
   # of a config from Camoufox's generators, which already did; `.for` and
   # `Geometry.fix` do that.
   #
-  # A config does not change after it is built. `#merge` returns a new one.
+  # A config does not change after it is built: it keeps deep copies of the
+  # values it is given, and `#[]`, `#[]?` and `#to_h` return deep copies, so
+  # a caller cannot change a validated value. `#merge` returns a new config.
   struct Config
     # The fields of every `voices` entry: Camoufox `MaskConfig::MVoices()`
     # skips an entry without one of them (`VOICE_FIELDS` in
@@ -30,8 +32,7 @@ module Crystalfaux::Fingerprint
     # Builds a config from *values*. Raises `ConfigError` when a key is
     # unknown or a value has the wrong type.
     def initialize(values : Hash(String, JSON::Any))
-      values.each { |key, value| Config.validate(key, value) }
-      @values = values.dup
+      @values = values.to_h { |key, value| {key, Config.validate(key, value.clone)} }
     end
 
     # Builds a config from a hash of values that serialize to JSON, such as
@@ -90,12 +91,12 @@ module Crystalfaux::Fingerprint
 
     # The value of *key*. Raises `KeyError` when the config has no *key*.
     def [](key : String) : JSON::Any
-      @values[key]
+      @values[key].clone
     end
 
     # The value of *key*, or `nil` when the config has no *key*.
     def []?(key : String) : JSON::Any?
-      @values[key]?
+      @values[key]?.try(&.clone)
     end
 
     # Returns a new config with the keys of *values* added or replaced.
@@ -104,9 +105,9 @@ module Crystalfaux::Fingerprint
       Config.new(@values.merge(values))
     end
 
-    # A copy of the values.
+    # A deep copy of the values.
     def to_h : Hash(String, JSON::Any)
-      @values.dup
+      @values.clone
     end
 
     def to_json(json : JSON::Builder) : Nil
@@ -120,8 +121,8 @@ module Crystalfaux::Fingerprint
     # :nodoc:
     #
     # Raises `ConfigError` unless *key* is a known property and *value* has
-    # its type.
-    def self.validate(key : String, value : JSON::Any) : Nil
+    # its type. Returns *value* normalized for that type.
+    def self.validate(key : String, value : JSON::Any) : JSON::Any
       type = Properties::TYPES[key]?
       raise ConfigError.new("Unknown config key #{key.inspect}") unless type
       unless type.matches?(value)
@@ -129,6 +130,7 @@ module Crystalfaux::Fingerprint
           "Invalid type for config key #{key.inspect}: expected #{type.json_name}, got #{json_type(value)}")
       end
       validate_voices(value.as_a) if key == "voices"
+      type.normalize(value)
     end
 
     private def self.validate_voices(voices : Array(JSON::Any)) : Nil
