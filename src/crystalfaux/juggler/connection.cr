@@ -320,7 +320,7 @@ module Crystalfaux::Juggler
       if id = message["id"]?.try(&.as_i64?)
         resolve(id, message)
       elsif method = message["method"]?.try(&.as_s?)
-        emit(method, message["sessionId"]?.try(&.as_s?), message["params"]? || JSON::Any.new({} of String => JSON::Any))
+        emit(frame, method, message["sessionId"]?.try(&.as_s?), message["params"]? || JSON::Any.new({} of String => JSON::Any))
       end
     rescue ex : JSON::ParseException
       Log.warn(exception: ex) { "Skipped a Juggler frame that is not valid JSON" }
@@ -332,12 +332,14 @@ module Crystalfaux::Juggler
       reply.try &.send(message)
     end
 
-    private def emit(method : String, session_id : String?, params : JSON::Any) : Nil
+    # A handler that raises, for example because *params* do not decode, is
+    # logged with *frame*; the other handlers and the reader fiber go on.
+    private def emit(frame : String, method : String, session_id : String?, params : JSON::Any) : Nil
       subscriptions = @lock.synchronize { @subscriptions[{session_id, method}]?.try(&.dup) }
       subscriptions.try &.each do |subscription|
         subscription.handler.call(params)
       rescue ex
-        Log.error(exception: ex) { "Juggler event handler for #{method} raised" }
+        Log.error(exception: ex) { "Juggler event handler for #{method} raised on frame #{frame}" }
       end
     end
 

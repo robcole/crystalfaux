@@ -19,8 +19,17 @@ module Crystalfaux::Protocol
       end
 
       # *headers* as `HTTP::Headers`; a repeated name keeps every value.
+      #
+      # Firefox merges repeated response headers such as `Set-Cookie` into
+      # one entry, joined with a newline, and Juggler forwards that entry
+      # unchanged (Camoufox `additions/juggler/NetworkObserver.js:960`,
+      # `responseHead`). Juggler splits `Set-Cookie` on `'\n'` itself when
+      # it fulfills a request (`NetworkObserver.js:208`). A newline is never
+      # valid in a header value, so every value is split on it.
       def self.to_http(headers : Array(HTTPHeader)) : HTTP::Headers
-        headers.each_with_object(HTTP::Headers.new) { |header, http| http.add(header.name, header.value) }
+        headers.each_with_object(HTTP::Headers.new) do |header, http|
+          header.value.split('\n') { |value| http.add(header.name, value) }
+        end
       end
     end
 
