@@ -94,8 +94,11 @@ guides as references.
   evaluation, network, or input.
 - When changing public types or accessors, compile representative existing
   consumer code. Document intentional breaking changes and migration steps.
-- Give concurrent Crystal test runs separate `CRYSTAL_CACHE_DIR` directories.
-  Delete only cache directories owned by that run.
+- Use one persistent Crystal compiler cache per checkout: `bin/check` and
+  `scripts/spec` set `CRYSTAL_CACHE_DIR` to `.crystal-cache` in the checkout.
+  Do not run two full compiles at once in one checkout. Specs that start a
+  `crystal` child process pass `crystal_cache_dir` from
+  `spec/spec_helper.cr` in its `env`.
 
 ## Concurrency
 

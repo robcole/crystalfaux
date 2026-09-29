@@ -1,0 +1,504 @@
+require "../../spec_helper"
+require "log/spec"
+
+# Pending replies are internal state with no public view; this spec-only
+# reader lets the specs prove a failed call releases its entry.
+class Crystalfaux::Juggler::Connection
+  def pending_count_for_spec : Int32
+    @lock.synchronize { @pending.size }
+  end
+end
+
+describe Crystalfaux::Juggler::Connection do
+  describe "#call" do
+    it "sends the request and returns the result of the matching reply" do
+      connection, peer = connected_pair
+      outcome = async { connection.call("Page.navigate", {frameId: "f1", url: "about:blank"}, "s1") }
+
+      request = peer.request
+      request["method"].should eq("Page.navigate")
+      request["params"].should eq(JSON.parse(%({"frameId":"f1","url":"about:blank"})))
+      request["sessionId"].should eq("s1")
+      peer.reply(request["id"], {navigationId: "nav-1"}, "s1")
+
+      receive_within(outcome).should eq(JSON.parse(%({"navigationId":"nav-1"})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "sends root-session requests without sessionId and with empty params" do
+      connection, peer = connected_pair
+      outcome = async { connection.call("Browser.getInfo") }
+
+      request = peer.request
+      request.as_h.has_key?("sessionId").should be_false
+      request["params"].should eq(JSON.parse("{}"))
+      peer.reply(request["id"], {version: "Firefox/152.0.4"})
+
+      receive_within(outcome).should eq(JSON.parse(%({"version":"Firefox/152.0.4"})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "uses increasing ids and matches replies that arrive out of order" do
+      connection, peer = connected_pair
+      first = async { connection.call("Runtime.evaluate", {expression: "1"}) }
+      first_request = peer.request
+      second = async { connection.call("Runtime.evaluate", {expression: "2"}) }
+      second_request = peer.request
+
+      second_request["id"].as_i64.should be > first_request["id"].as_i64
+      peer.reply(second_request["id"], {value: 2})
+      peer.reply(first_request["id"], {value: 1})
+
+      receive_within(first).should eq(JSON.parse(%({"value":1})))
+      receive_within(second).should eq(JSON.parse(%({"value":2})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises ProtocolError when the reply carries an error" do
+      connection, peer = connected_pair
+      outcome = async { connection.call("Browser.setDefaultViewport") }
+
+      peer.reply_error(peer.request["id"], "Invalid parameters")
+
+      error = receive_within(outcome).should be_a(Crystalfaux::ProtocolError)
+      error.method.should eq("Browser.setDefaultViewport")
+      error.message.should eq("Protocol error (Browser.setDefaultViewport): Invalid parameters")
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises TimeoutError when no reply arrives in time and ignores a late reply" do
+      connection, peer = connected_pair
+      slow = async { connection.call("Browser.close", timeout: 20.milliseconds) }
+      slow_request = peer.request
+
+      error = receive_within(slow).should be_a(Crystalfaux::TimeoutError)
+      error.message.should eq("Browser.close timed out after 00:00:00.020000000")
+
+      peer.reply(slow_request["id"], {late: true})
+      next_call = async { connection.call("Browser.getInfo") }
+      peer.reply(peer.request["id"], {on_time: true})
+      receive_within(next_call).should eq(JSON.parse(%({"on_time":true})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "releases the request when its params cannot be serialized" do
+      connection, peer = connected_pair
+
+      expect_raises(JSON::Error) { connection.call("Page.method", {value: Float64::NAN}) }
+
+      connection.pending_count_for_spec.should eq(0)
+      outcome = async { connection.call("Browser.getInfo") }
+      request = peer.request
+      request["method"].should eq("Browser.getInfo")
+      peer.reply(request["id"], {ok: true})
+      receive_within(outcome).should eq(JSON.parse(%({"ok":true})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "times out a queued call without sending it and stays usable" do
+      connection, peer = connected_pair
+      # Blocks the writer until the peer reads, which it does not do yet.
+      blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, timeout: 5.seconds) }
+      Fiber.yield
+      queued = async { connection.call("Browser.getInfo", timeout: 30.milliseconds) }
+
+      receive_within(queued).should be_a(Crystalfaux::TimeoutError)
+      connection.closed?.should be_false
+
+      blocked_request = peer.request
+      blocked_request["method"].should eq("Runtime.evaluate")
+      peer.reply(blocked_request["id"], {value: 1})
+      receive_within(blocked).should eq(JSON.parse(%({"value":1})))
+
+      later = async { connection.call("Browser.newPage") }
+      later_request = peer.request
+      later_request["method"].should eq("Browser.newPage")
+      peer.reply(later_request["id"], {targetId: "t1"})
+      receive_within(later).should eq(JSON.parse(%({"targetId":"t1"})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises ConnectionClosed after the connection is closed" do
+      connection, peer = connected_pair
+      connection.close
+
+      expect_raises(Crystalfaux::ConnectionClosed) { connection.call("Browser.getInfo") }
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#call with a cancellation" do
+    it "raises the cancellation reason at once, drops the late reply and stays open" do
+      connection, peer = connected_pair
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      outcome = async { connection.call("Runtime.evaluate", nil, "s1", 5.seconds, cancellation) }
+      request = peer.request
+
+      cancellation.cancel(Crystalfaux::PageCrashed.new("crashed"))
+
+      receive_within(outcome, 200.milliseconds).should be_a(Crystalfaux::PageCrashed)
+      connection.pending_count_for_spec.should eq(0)
+      peer.reply(request["id"], {result: {value: 1}}, "s1")
+      other = async { connection.call("Browser.getInfo") }
+      peer.reply(peer.request["id"], {version: "v"})
+      receive_within(other).should eq(JSON.parse(%({"version":"v"})))
+      connection.closed?.should be_false
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises before sending when already cancelled, keeping the first reason" do
+      connection, peer = connected_pair
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      cancellation.cancel(Crystalfaux::PageClosed.new("closed"))
+      cancellation.cancel(Crystalfaux::PageCrashed.new("crashed"))
+
+      expect_raises(Crystalfaux::PageClosed) { connection.call("Runtime.evaluate", nil, "s1", 1.second, cancellation) }
+      connection.pending_count_for_spec.should eq(0)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+    it "closes the connection by the original deadline when cancelled during a blocked write" do
+      connection, peer = connected_pair
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      # Far larger than a pipe buffer, so the write blocks once the peer
+      # stops reading.
+      blocked = async do
+        connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, "s1", 150.milliseconds, cancellation)
+      end
+      peer.io.read_byte.should eq('{'.ord) # the writer has started the frame
+      queued = async { connection.call("Browser.getInfo", timeout: 5.seconds) }
+
+      cancellation.cancel(Crystalfaux::PageCrashed.new("crashed"))
+
+      receive_within(blocked, 50.milliseconds).should be_a(Crystalfaux::PageCrashed)
+      connection.closed?.should be_false
+      receive_within(queued).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "writes nothing and stays usable when cancelled before the hand-off" do
+      connection, peer = connected_pair
+      # Occupies the writer until the peer reads it, so the next call waits
+      # to hand off its request.
+      first = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, "s1", 5.seconds) }
+      Fiber.yield
+      cancellation = Crystalfaux::Juggler::Cancellation.new
+      waiting = async { connection.call("Page.close", nil, "s1", 5.seconds, cancellation) }
+      Fiber.yield
+
+      cancellation.cancel(Crystalfaux::PageClosed.new("closed"))
+
+      receive_within(waiting).should be_a(Crystalfaux::PageClosed)
+      evaluate = peer.request
+      evaluate["method"].should eq("Runtime.evaluate")
+      peer.reply(evaluate["id"], {result: {value: 1}}, "s1")
+      receive_within(first).should eq(JSON.parse(%({"result":{"value":1}})))
+      later = async { connection.call("Browser.getInfo") }
+      # The cancelled Page.close was never written: the next frame is this one.
+      info = peer.request
+      info["method"].should eq("Browser.getInfo")
+      peer.reply(info["id"], {version: "v"})
+      receive_within(later).should eq(JSON.parse(%({"version":"v"})))
+      connection.closed?.should be_false
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#off_close" do
+    it "stops the handler from running" do
+      connection, peer = connected_pair
+      called = false
+      handler = connection.on_close { called = true }
+
+      connection.off_close(handler)
+      connection.close
+
+      called.should be_false
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#notify" do
+    it "returns once the request is written and drops the reply" do
+      connection, peer = connected_pair
+
+      connection.notify("Browser.close", timeout: 1.second)
+
+      request = peer.request
+      request["method"].should eq("Browser.close")
+      peer.reply(request["id"], {} of String => String)
+      outcome = async { connection.call("Browser.getInfo") }
+      follow_up = peer.request
+      follow_up["id"].as_i64.should be > request["id"].as_i64
+      peer.reply(follow_up["id"], {version: "Firefox/152.0"})
+      receive_within(outcome).should eq(JSON.parse(%({"version":"Firefox/152.0"})))
+      connection.pending_count_for_spec.should eq(0)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "times out while another request fills the pipe the peer never reads" do
+      connection, peer = connected_pair
+      blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, timeout: 5.seconds) }
+      Fiber.yield
+      started = Time.instant
+
+      expect_raises(Crystalfaux::TimeoutError, /Browser.close/) do
+        connection.notify("Browser.close", timeout: 50.milliseconds)
+      end
+
+      (Time.instant - started).should be < 1.second
+      connection.close
+      receive_within(blocked).should be_a(Crystalfaux::ConnectionClosed)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "raises ConnectionClosed after the connection is closed" do
+      connection, peer = connected_pair
+      connection.close
+
+      expect_raises(Crystalfaux::ConnectionClosed) { connection.notify("Browser.close") }
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#on" do
+    it "routes events by session and method" do
+      connection, peer = connected_pair
+      root = Channel(JSON::Any).new(10)
+      page = Channel(JSON::Any).new(10)
+      connection.on("Browser.attachedToTarget") { |params| root.send(params) }
+      connection.on("Page.eventFired", "s1") { |params| page.send(params) }
+
+      peer.event("Page.eventFired", {name: "load"}, "other-session")
+      peer.event("Page.frameAttached", {frameId: "f1"}, "s1")
+      peer.event("Page.eventFired", {name: "load"}, "s1")
+      peer.event("Browser.attachedToTarget", {sessionId: "s1"})
+
+      receive_within(page).should eq(JSON.parse(%({"name":"load"})))
+      receive_within(root).should eq(JSON.parse(%({"sessionId":"s1"})))
+      quiet?(page).should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "handles events that arrive before a reply before the call returns" do
+      connection, peer = connected_pair
+      attached = [] of String
+      connection.on("Browser.attachedToTarget") { |params| attached << params["sessionId"].as_s }
+      outcome = async { connection.call("Browser.newPage", {browserContextId: "c1"}) }
+
+      request = peer.request
+      peer.event("Browser.attachedToTarget", {sessionId: "s1"})
+      peer.reply(request["id"], {targetId: "t1"})
+
+      receive_within(outcome)
+      attached.should eq(["s1"])
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "keeps dispatching after a handler raises" do
+      connection, peer = connected_pair
+      names = Channel(String).new(10)
+      connection.on("Page.eventFired", "s1") do |params|
+        name = params["name"].as_s
+        raise "handler failed" if name == "bad"
+        names.send(name)
+      end
+
+      peer.event("Page.eventFired", {name: "bad"}, "s1")
+      peer.event("Page.eventFired", {name: "load"}, "s1")
+
+      receive_within(names).should eq("load")
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+    it "logs the frame when a handler raises" do
+      connection, peer = connected_pair
+      names = Channel(String).new(10)
+      connection.on("Page.eventFired", "s1") do |params|
+        name = params["name"].as_s
+        raise "handler failed" if name == "bad"
+        names.send(name)
+      end
+
+      Log.capture("crystalfaux.juggler") do |logs|
+        peer.event("Page.eventFired", {name: "bad"}, "s1")
+        peer.event("Page.eventFired", {name: "load"}, "s1")
+        receive_within(names)
+
+        logs.check(:error, /Page\.eventFired raised on frame .*"name":"bad"/)
+        logs.entry.exception.try(&.message).should eq("handler failed")
+      end
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#off" do
+    it "stops delivering events to the removed handler" do
+      connection, peer = connected_pair
+      names = Channel(String).new(10)
+      subscription = connection.on("Page.eventFired", "s1") { |params| names.send(params["name"].as_s) }
+      connection.on("Page.eventFired", "s1") { |_params| names.send("kept") }
+
+      connection.off(subscription)
+      peer.event("Page.eventFired", {name: "load"}, "s1")
+
+      receive_within(names).should eq("kept")
+      quiet?(names).should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "#on_close" do
+    it "calls the handler once when the peer closes the pipe" do
+      connection, peer = connected_pair
+      calls = Channel(Nil).new(2)
+      connection.on_close { calls.send(nil) }
+
+      peer.close
+      receive_within(calls)
+      connection.close
+
+      quiet?(calls).should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "calls the handler at once when the connection is already closed" do
+      connection, peer = connected_pair
+      connection.close
+      called = false
+
+      connection.on_close { called = true }
+
+      called.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+  end
+
+  describe "disconnect" do
+    it "fails every pending call with ConnectionClosed at end of stream" do
+      connection, peer = connected_pair
+      first = async { connection.call("Browser.getInfo") }
+      peer.request
+      second = async { connection.call("Page.navigate", nil, "s1") }
+      peer.request
+
+      peer.close
+
+      receive_within(first).should be_a(Crystalfaux::ConnectionClosed)
+      receive_within(second).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "fails every pending call with ConnectionClosed when closed locally" do
+      connection, peer = connected_pair
+      outcome = async { connection.call("Browser.getInfo") }
+      peer.request
+
+      connection.close
+
+      receive_within(outcome).should be_a(Crystalfaux::ConnectionClosed)
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "skips a frame that is not valid JSON and keeps reading" do
+      connection, peer = connected_pair
+      outcome = async { connection.call("Browser.getInfo") }
+      request = peer.request
+
+      peer.raw("not json")
+      peer.reply(request["id"], {ok: true})
+
+      receive_within(outcome).should eq(JSON.parse(%({"ok":true})))
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "times out a write the peer never reads and fails the call queued behind it" do
+      connection, peer = connected_pair
+      # Far larger than a pipe buffer, so the write blocks while the peer is
+      # open but not reading.
+      blocked = async { connection.call("Runtime.evaluate", {expression: "x" * 2_000_000}, timeout: 50.milliseconds) }
+      Fiber.yield
+      queued = async { connection.call("Browser.getInfo", timeout: 5.seconds) }
+
+      receive_within(blocked).should be_a(Crystalfaux::TimeoutError)
+      receive_within(queued).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+
+    it "fails every pending call when the request pipe breaks" do
+      request_reader, request_writer = IO.pipe
+      reply_reader, reply_writer = IO.pipe
+      io = IO::Stapled.new(reply_reader, request_writer, sync_close: true)
+      connection = Crystalfaux::Juggler::Connection.new(Crystalfaux::Juggler::Transport.new(io))
+      pending = async { connection.call("Browser.getInfo") }
+      request_reader.gets('\0').should_not be_nil
+
+      # The browser closes its request fd but keeps its reply fd open.
+      request_reader.close
+      failed = async { connection.call("Browser.newPage") }
+
+      receive_within(failed).should be_a(Crystalfaux::ConnectionClosed)
+      receive_within(pending).should be_a(Crystalfaux::ConnectionClosed)
+      connection.closed?.should be_true
+    ensure
+      connection.try &.close
+      request_reader.try &.close
+      reply_writer.try &.close
+    end
+  end
+end

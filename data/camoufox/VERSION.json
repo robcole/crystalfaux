@@ -1,0 +1,14 @@
+{
+  "commit": "eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a",
+  "fetched": "2026-09-28",
+  "files": {
+    "properties.json": {
+      "source": "https://github.com/daijro/camoufox/blob/eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a/settings/properties.json",
+      "sha256": "c628512bd590502c3736f32a702099304414801e0aa4b9dedd961c756a8dcb72"
+    },
+    "fonts.json": {
+      "source": "https://github.com/daijro/camoufox/blob/eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a/pythonlib/camoufox/fonts.json",
+      "sha256": "96875a5638ea4aa2b22f109d8468a929f3ae389ee8b68a80f6eabbbdf26aa8a2"
+    }
+  }
+}

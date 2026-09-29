@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Runs the checks every change must pass: formatting, Ameba, and specs.
+# Run `shards install` first. Ameba 1.7 does not build itself on install, so
+# this script builds bin/ameba from the shard's `ameba` target when missing.
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+# One compiler cache per checkout: `crystal spec` writes its executable to a
+# fixed name in the cache, so a shared cache lets parallel checkouts collide.
+export CRYSTAL_CACHE_DIR="${CRYSTAL_CACHE_DIR:-$PWD/.crystal-cache}"
+
+[[ -x bin/ameba ]] || shards build ameba
+
+crystal tool format --check
+bin/ameba
+crystal spec

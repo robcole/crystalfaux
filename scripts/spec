@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Runs `crystal spec` with the compiler cache in this checkout, so parallel
+# runs in other checkouts do not replace this run's spec executable.
+# Arguments pass through, for example `scripts/spec --tag browser`.
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+export CRYSTAL_CACHE_DIR="${CRYSTAL_CACHE_DIR:-$PWD/.crystal-cache}"
+exec crystal spec "$@"

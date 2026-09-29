@@ -1,1 +1,11 @@
-plans/
+plans
+/lib/
+/.shards/
+*.dwarf
+/bin/ameba
+/.crystal-cache/
+/bin/crystalfaux
+# `crystal docs` output.
+/docs/
+# Playwright MCP session logs.
+/.playwright-mcp/

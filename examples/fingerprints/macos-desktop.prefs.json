@@ -1,0 +1,9 @@
+{
+  "dom.quotaManager.temporaryStorage.fixedLimit": 244140625,
+  "intl.locale.requested": "en-US",
+  "privacy.donottrackheader.enabled": false,
+  "privacy.globalprivacycontrol.enabled": false,
+  "ui.useOverlayScrollbars": 1,
+  "webgl.enable-webgl2": true,
+  "webgl.force-enabled": true
+}
