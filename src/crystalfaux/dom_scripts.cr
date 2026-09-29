@@ -126,39 +126,46 @@ module Crystalfaux
       };
       JS
 
-    # Hit-tests the centre of the element's first box in its own frame.
-    # Returns `{result, x, y}`: `HIT_TEST`'s result, or `"notconnected"`,
-    # and the point in the frame's viewport. The first box is the first
-    # quad that `Page.getContentQuads` reports.
+    # Hit-tests the centre of the element's first box in its own frame, the
+    # first quad that `Page.getContentQuads` reports. Returns `HIT_TEST`'s
+    # result, or `"notconnected"`.
     HIT_TARGET = <<-JS
       el => {
         #{HIT_TEST}
-        if (!el.isConnected) return {result: 'notconnected'};
+        if (!el.isConnected) return 'notconnected';
         const boxes = el.getClientRects();
-        if (!boxes.length) return {result: 'element is not visible'};
+        if (!boxes.length) return 'element is not visible';
         const box = boxes[0];
-        const x = box.left + box.width / 2, y = box.top + box.height / 2;
-        return {result: hitTest(el, x, y), x, y};
+        return hitTest(el, box.left + box.width / 2, box.top + box.height / 2);
       }
       JS
 
-    # Hit-tests, in the parent frame, the point (*x*, *y*) of the child
-    # frame's viewport that *iframe* shows (Playwright `server/dom.ts`,
-    # `_checkFrameIsHitTarget`, and `injected/injectedScript.ts`,
-    # `describeIFrameStyle`). Returns `{result, x, y}` with the point in the
-    # parent frame's viewport. A transformed `<iframe>` maps points in a way
-    # this does not follow; as Playwright does, the check then stops with
-    # `{result: 'done', transformed: true}`.
+    # Hit-tests *iframe* at (*x*, *y*) of its own document's viewport
+    # (Playwright `server/dom.ts`, `_checkFrameIsHitTarget`). Returns
+    # `HIT_TEST`'s result, or `"notconnected"`.
     FRAME_HIT_TARGET = <<-JS
       (iframe, x, y) => {
         #{HIT_TEST}
-        if (!iframe.isConnected) return {result: 'notconnected'};
+        if (!iframe.isConnected) return 'notconnected';
+        return hitTest(iframe, x, y);
+      }
+      JS
+
+    # The border box of *iframe* before transforms, and the offset of the
+    # child frame's viewport in it: the left and top border and padding
+    # (Playwright `injected/injectedScript.ts`, `describeIFrameStyle`).
+    FRAME_BOX = <<-JS
+      iframe => {
         const style = iframe.ownerDocument.defaultView.getComputedStyle(iframe);
-        if (style.transform !== 'none') return {result: 'done', transformed: true};
-        const box = iframe.getBoundingClientRect();
-        const px = x + box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
-        const py = y + box.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
-        return {result: hitTest(iframe, px, py), x: px, y: py};
+        const px = name => parseFloat(style[name]) || 0;
+        const extra = style.boxSizing === 'border-box' ? [0, 0] : [
+          px('borderLeftWidth') + px('paddingLeft') + px('paddingRight') + px('borderRightWidth'),
+          px('borderTopWidth') + px('paddingTop') + px('paddingBottom') + px('borderBottomWidth'),
+        ];
+        return {
+          width: px('width') + extra[0], height: px('height') + extra[1],
+          left: px('borderLeftWidth') + px('paddingLeft'), top: px('borderTopWidth') + px('paddingTop'),
+        };
       }
       JS
 

@@ -199,9 +199,33 @@ module Crystalfaux::Protocol
       field p3 : Point
       field p4 : Point
 
+      # How far, in CSS pixels, the fourth corner may be from where a
+      # parallelogram would put it.
+      PARALLELOGRAM_TOLERANCE = 0.5
+
       # The corners in order.
       def points : {Point, Point, Point, Point}
         {p1, p2, p3, p4}
+      end
+
+      # Maps the point (*x*, *y*) of the quad's coordinates into the box that
+      # the quad shows: a *width* by *height* box whose top-left corner is
+      # `p1`, top-right `p2` and bottom-left `p4`. This undoes an affine CSS
+      # transform, such as a translation, scale or rotation.
+      #
+      # Returns `nil` when the quad has no area, or is not a parallelogram,
+      # as after a perspective transform: the point cannot be mapped then.
+      def local_point(x : Float64, y : Float64, width : Float64, height : Float64) : {Float64, Float64}?
+        top_x, top_y = p2.x - p1.x, p2.y - p1.y
+        left_x, left_y = p4.x - p1.x, p4.y - p1.y
+        determinant = top_x * left_y - top_y * left_x
+        return if determinant.abs < 1e-9
+        return unless (p1.x + top_x + left_x - p3.x).abs <= PARALLELOGRAM_TOLERANCE &&
+                      (p1.y + top_y + left_y - p3.y).abs <= PARALLELOGRAM_TOLERANCE
+        dx, dy = x - p1.x, y - p1.y
+        along_top = (dx * left_y - dy * left_x) / determinant
+        along_left = (top_x * dy - top_y * dx) / determinant
+        {along_top * width, along_left * height}
       end
     end
 

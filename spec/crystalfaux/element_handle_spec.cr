@@ -28,9 +28,9 @@ private def page_with_handle(browser : Crystalfaux::Browser, fake : ScriptedBrow
   {page, handle}
 end
 
-# A reply of `DomScripts::HIT_TARGET` or `DomScripts::FRAME_HIT_TARGET`.
-private def hit(result : String, x : Float64 = 20, y : Float64 = 10)
-  {result: {type: "object", value: {result: result, x: x, y: y}}}
+# A string result, such as the verdict of a hit test.
+private def verdict(text : String)
+  {result: {type: "string", value: text}}
 end
 
 # Answers each `Runtime.callFunction` with the block's result for its
@@ -282,7 +282,7 @@ describe Crystalfaux::ElementHandle do
       on_function(fake) do |function, _|
         case function
         when DomScripts::ACTIONABLE then reply({result: {type: "string", value: "done"}})
-        when DomScripts::HIT_TARGET then reply(hit("done"))
+        when DomScripts::HIT_TARGET then reply(verdict("done"))
         else                             raise "unexpected function #{function}"
         end
       end
@@ -307,7 +307,7 @@ describe Crystalfaux::ElementHandle do
       on_function(fake) do |function, _|
         case function
         when DomScripts::ACTIONABLE then reply({result: {type: "string", value: "done"}})
-        when DomScripts::HIT_TARGET then reply(hit(%(covered by <div id="cover">)))
+        when DomScripts::HIT_TARGET then reply(verdict(%(covered by <div id="cover">)))
         else                             raise "unexpected function #{function}"
         end
       end
@@ -338,7 +338,7 @@ describe Crystalfaux::ElementHandle do
       browser, fake = scripted_browser
       _, handle = page_with_handle(browser, fake)
       on_function(fake) do |function, _|
-        function == DomScripts::HIT_TARGET ? reply(hit("done")) : reply({result: {type: "string", value: "done"}})
+        function == DomScripts::HIT_TARGET ? reply(verdict("done")) : reply({result: {type: "string", value: "done"}})
       end
       fake.on("Page.getContentQuads") { reply({quads: [quad(100, 50, 40, 20)]}) }
       # The fake serves one request at a time, so each input event takes 200 ms.
@@ -369,8 +369,8 @@ describe Crystalfaux::ElementHandle do
       on_function(fake) do |function, _|
         case function
         when DomScripts::ACTIONABLE       then reply({result: {type: "string", value: "done"}})
-        when DomScripts::HIT_TARGET       then reply(hit("done", 20, 10))
-        when DomScripts::FRAME_HIT_TARGET then reply(hit(%(covered by <div id="cover">), 120, 60))
+        when DomScripts::HIT_TARGET       then reply(verdict("done"))
+        when DomScripts::FRAME_HIT_TARGET then reply(verdict(%(covered by <div id="cover">)))
         else                                   raise "unexpected function #{function}"
         end
       end
@@ -385,8 +385,42 @@ describe Crystalfaux::ElementHandle do
         break params if params["functionDeclaration"] == DomScripts::FRAME_HIT_TARGET
       end.should_not(be_nil)
       frame_check["executionContextId"].should eq("id-3")
-      frame_check["args"].should eq(json_frame([{objectId: "owner-1"}, {value: 20}, {value: 10}]))
+      # The centre of the element's quad, in the main frame's viewport.
+      frame_check["args"].should eq(json_frame([{objectId: "owner-1"}, {value: 120}, {value: 60}]))
       fake.request("Runtime.disposeObject")["params"].should eq(json_frame({executionContextId: "id-3", objectId: "owner-1"}))
+      fake.methods.should_not contain("Page.dispatchMouseEvent")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "sends no click when the point cannot be mapped into an ancestor frame" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.event("Page.frameAttached", {frameId: "child-1", parentFrameId: ProbeScript::FRAME_ID})
+      fake.event("Runtime.executionContextCreated", {executionContextId: "id-7", auxData: {frameId: "child-1", name: ""}})
+      fake.event("Page.frameAttached", {frameId: "grandchild-1", parentFrameId: "child-1"})
+      fake.event("Runtime.executionContextCreated", {executionContextId: "id-8", auxData: {frameId: "grandchild-1", name: ""}})
+      page.wait_for_events_for_spec
+      fake.on("Runtime.callFunction") { reply(node("obj-1")) }
+      handle = page.main_frame.children.first.children.first.query_selector("#go").should_not(be_nil)
+      on_function(fake) do |function, _|
+        case function
+        when DomScripts::FRAME_BOX then reply({result: {type: "object", value: {width: 100, height: 50, left: 0, top: 0}}})
+        else                            reply(verdict("done"))
+        end
+      end
+      fake.on("Page.adoptNode") { reply({remoteObject: {type: "object", subtype: "node", objectId: "owner-1"}}) }
+      # The element's quad, then the child frame's <iframe> under a perspective.
+      fake.on("Page.getContentQuads") do |request|
+        if request["params"]["objectId"] == "owner-1"
+          reply({quads: [{p1: {x: 0, y: 0}, p2: {x: 100, y: 0}, p3: {x: 90, y: 50}, p4: {x: 10, y: 60}}]})
+        else
+          reply({quads: [quad(40, 20, 20, 10)]})
+        end
+      end
+
+      expect_raises(Crystalfaux::TimeoutError, "cannot be mapped into frame child-1") { handle.click(timeout: 100.milliseconds) }
       fake.methods.should_not contain("Page.dispatchMouseEvent")
     ensure
       browser.try &.close

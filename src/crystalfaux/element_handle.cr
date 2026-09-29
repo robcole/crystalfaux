@@ -199,21 +199,21 @@ module Crystalfaux
       end
       point = click_point(content_quads(deadline))
       return "element is not visible" unless point
-      if reason = hit_path_failure(deadline)
+      x, y = point
+      if reason = hit_path_failure(x, y, deadline)
         return reason
       end
-      x, y = point
       @frame.page.mouse.click(x, y, timeout: deadline - Time.instant)
       nil
     end
 
-    # Hit-tests the element in its frame, then the frame in each ancestor.
-    # Returns `nil` when a click reaches the element, or the failed check.
-    private def hit_path_failure(deadline : Time::Instant) : String?
-      target = run(DomScripts::HIT_TARGET, [self_argument], deadline)
-      result = target["result"]?.try(&.as_s?)
-      return failed_check(result) unless result == "done"
-      path = @frame.check_hit_path(@frame.coordinate(target["x"]?), @frame.coordinate(target["y"]?), deadline)
+    # Hit-tests the element in its frame, then the frame in each ancestor
+    # at (*x*, *y*), the click point in the main frame's viewport. Returns
+    # `nil` when a click reaches the element, or the failed check.
+    private def hit_path_failure(x : Float64, y : Float64, deadline : Time::Instant) : String?
+      target = run(DomScripts::HIT_TARGET, [self_argument], deadline).as_s?
+      return failed_check(target) unless target == "done"
+      path = @frame.check_hit_path(x, y, deadline)
       failed_check(path) unless path == "done"
     end
 

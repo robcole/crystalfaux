@@ -6,6 +6,22 @@ require "http/server"
 # view and that a re-render replaces, dialogs that open and close late, and
 # an overlay that covers a button. The pages' own scripts log what they see
 # in DOM attributes, which the isolated world can read.
+# A page with an `<iframe>` of `/inner` whose CSS transform is *transform*,
+# under a cover that fills the viewport.
+private def framed_html(transform : String) : String
+  <<-HTML
+    <!doctype html><title>framed</title>
+    <style>
+      body { margin: 0; }
+      iframe { position: absolute; left: 50px; top: 40px; width: 300px; height: 200px; border: 5px solid; padding: 3px;
+               transform: #{transform}; }
+      #cover { position: fixed; inset: 0; background: rgba(0,0,0,.3); }
+    </style>
+    <iframe src="/inner"></iframe>
+    <div id="cover" onclick="document.body.dataset.coverClicked = 'yes'"></div>
+    HTML
+end
+
 private PAGES = {
   "/grid" => <<-HTML,
     <!doctype html><title>grid</title>
@@ -72,15 +88,25 @@ private PAGES = {
     <style>@keyframes slide { from { left: 0 } to { left: 300px } }</style>
     <div id="cover"></div>
     HTML
-  "/framed" => <<-HTML,
-    <!doctype html><title>framed</title>
+  "/nested" => <<-HTML,
+    <!doctype html><title>nested</title>
     <style>
       body { margin: 0; }
-      iframe { position: absolute; left: 50px; top: 40px; width: 300px; height: 200px; border: 5px solid; padding: 3px; }
-      #cover { position: fixed; inset: 0; background: rgba(0,0,0,.3); }
+      iframe { position: absolute; left: 30px; top: 20px; width: 500px; height: 400px; border: 2px solid;
+               transform: scale(0.9) rotate(5deg); }
+    </style>
+    <iframe src="/middle"></iframe>
+    HTML
+  "/middle" => <<-HTML,
+    <!doctype html><title>middle</title>
+    <style>
+      body { margin: 0; }
+      iframe { position: absolute; left: 40px; top: 30px; width: 300px; height: 250px; border: 4px solid; padding: 2px;
+               transform: translate(10px, 5px) rotate(-4deg); }
+      #middle-cover { position: fixed; inset: 0; background: rgba(0,0,0,.3); }
     </style>
     <iframe src="/inner"></iframe>
-    <div id="cover" onclick="document.body.dataset.coverClicked = 'yes'"></div>
+    <div id="middle-cover" onclick="document.body.dataset.coverClicked = 'yes'"></div>
     HTML
   "/inner" => <<-HTML,
     <!doctype html><title>inner</title>
@@ -103,6 +129,9 @@ private PAGES = {
     <!doctype html><title>second</title><p id="late"></p>
     <script>setTimeout(() => { document.getElementById('late').textContent = 'ready'; }, 300)</script>
     HTML
+  "/framed"             => framed_html("none"),
+  "/framed-transformed" => framed_html("translateX(0px)"),
+  "/framed-rotated"     => framed_html("rotate(8deg) scale(0.9)"),
 }
 
 private class ElementsServer
@@ -130,6 +159,16 @@ private def open_page(binary : String) : {Crystalfaux::Browser, Crystalfaux::Pag
   page = browser.new_context.new_page
   page.set_viewport_size(800, 600)
   {browser, page}
+end
+
+# The first child frame of *frame*, once the browser has attached it.
+private def first_child(frame : Crystalfaux::Frame) : Crystalfaux::Frame
+  deadline = Time.instant + 5.seconds
+  until child = frame.children.first?
+    raise "frame #{frame.id} has no child frame" if Time.instant > deadline
+    sleep 20.milliseconds
+  end
+  child
 end
 
 describe Crystalfaux::ElementHandle, tags: "browser" do
@@ -217,21 +256,44 @@ describe Crystalfaux::ElementHandle, tags: "browser" do
     server.try &.close
   end
 
-  it "does not click through a cover in a parent frame" do
+  it "does not click through a cover in a parent frame, transformed or not" do
     binary = camoufox_binary
     server = ElementsServer.new
     browser, page = open_page(binary)
-    page.goto("#{server.base_url}/framed")
-    frame = page.main_frame.children.first
-    target = frame.wait_for_selector("#target", timeout: 5.seconds).should_not(be_nil)
+    %w[/framed /framed-transformed /framed-rotated].each do |path|
+      page.goto("#{server.base_url}#{path}")
+      frame = page.main_frame.children.first
+      target = frame.wait_for_selector("#target", timeout: 5.seconds).should_not(be_nil)
 
-    expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="cover">)) { target.click(timeout: 500.milliseconds) }
-    page.evaluate("document.body.dataset.coverClicked || null").should eq(JSON::Any.new(nil))
-    frame.evaluate("document.body.dataset.clicked || null").should eq(JSON::Any.new(nil))
+      expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="cover">)) { target.click(timeout: 500.milliseconds) }
+      page.evaluate("document.body.dataset.coverClicked || null").should eq(JSON::Any.new(nil))
+      frame.evaluate("document.body.dataset.clicked || null").should eq(JSON::Any.new(nil))
 
-    page.evaluate("document.getElementById('cover').remove()")
+      page.evaluate("document.getElementById('cover').remove()")
+      target.click
+      frame.evaluate("document.body.dataset.clicked").should eq(JSON::Any.new("yes"))
+    end
+  ensure
+    browser.try &.close
+    server.try &.close
+  end
+
+  it "maps the click point through nested transformed frames" do
+    binary = camoufox_binary
+    server = ElementsServer.new
+    browser, page = open_page(binary)
+    page.goto("#{server.base_url}/nested")
+    middle = first_child(page.main_frame)
+    inner = first_child(middle)
+    target = inner.wait_for_selector("#target", timeout: 5.seconds).should_not(be_nil)
+
+    expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="middle-cover">)) { target.click(timeout: 500.milliseconds) }
+    middle.evaluate("document.body.dataset.coverClicked || null").should eq(JSON::Any.new(nil))
+    inner.evaluate("document.body.dataset.clicked || null").should eq(JSON::Any.new(nil))
+
+    middle.evaluate("document.getElementById('middle-cover').remove()")
     target.click
-    frame.evaluate("document.body.dataset.clicked").should eq(JSON::Any.new("yes"))
+    inner.evaluate("document.body.dataset.clicked").should eq(JSON::Any.new("yes"))
   ensure
     browser.try &.close
     server.try &.close
