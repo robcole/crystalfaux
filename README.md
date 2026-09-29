@@ -179,6 +179,22 @@ page.wait_for_selector("[role=dialog]", state: :hidden)
 page.wait_for_function("document.querySelectorAll('.sku-item').length >= 24")
 ```
 
+A handle is also a query root, and a script argument:
+
+```crystal
+# Find the Close button of one dialog only.
+offers = page.get_by_role("dialog", name: "Offers").first
+close = offers.get_by_role("button", name: "Close").first
+
+# Pass handles to a function: in a tuple for the page, after the element for a handle.
+page.evaluate("(dialog, button) => dialog.contains(button)", {offers, close}) # => true
+offers.evaluate("(dialog, button) => dialog.contains(button)", close)         # => true
+```
+
+A handle argument must come from the same document as the call. A disposed
+handle raises `HandleDisposed`, and a handle of another frame or document
+raises `ForeignHandle`. Nothing is sent to the browser then.
+
 A covered button does not get the click. The `TimeoutError` names the
 element on top, for example `covered by <div id="cover">`.
 

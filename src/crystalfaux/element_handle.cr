@@ -66,19 +66,22 @@ module Crystalfaux
     def initialize(@frame : Frame, @context_id : String, @remote_object_id : String)
     end
 
-    # Calls *function* with the element as its first argument and *args*,
-    # each as JSON, after it, and returns its value as JSON (see
-    # `Frame#evaluate` for the values of the isolated world).
+    # Calls *function* with the element as its first argument and *args*
+    # after it, and returns its value as JSON (see `Frame#evaluate` for the
+    # values of the isolated world). An `ElementHandle` argument is the
+    # element; any other argument is sent as JSON.
     #
     # ```
-    # link.evaluate("(el, name) => el.dataset[name]", "sku") # => "6571366"
+    # link.evaluate("(el, name) => el.dataset[name]", "sku")         # => "6571366"
+    # dialog.evaluate("(el, button) => el.contains(button)", button) # => true
     # ```
     #
     # Raises `EvaluationError` when the function throws, and
-    # `ExecutionContextDestroyed` when the handle's document is gone.
+    # `ExecutionContextDestroyed` when the handle's document is gone. A
+    # handle argument must belong to the same document: raises
+    # `HandleDisposed` or `ForeignHandle` before anything is sent.
     def evaluate(function : String, *args, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
-      arguments = [self_argument]
-      args.each { |arg| arguments << Protocol::Runtime::CallFunctionArgument.new(value: JSON.parse(arg.to_json)) }
+      arguments = [self_argument] + @frame.call_arguments(@context_id, args)
       run(function, arguments, Time.instant + timeout)
     end
 
@@ -120,6 +123,21 @@ module Crystalfaux
       deadline = Time.instant + timeout
       arguments = [self_argument, @frame.argument(selector)]
       @frame.elements_for(@context_id, handle_call(DomScripts::QUERY_ALL_UNDER, arguments, deadline), deadline)
+    end
+
+    # Returns the elements in the element's subtree with ARIA *role* and,
+    # when *name* is given, that accessible name, as `Frame#get_by_role`
+    # does for the document. The element itself is not a match.
+    #
+    # ```
+    # dialog = page.get_by_role("dialog", name: "Offers").first
+    # dialog.get_by_role("button", name: "Close").first.click
+    # ```
+    def get_by_role(role : String, *, name : String? = nil, exact : Bool = true,
+                    timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Array(ElementHandle)
+      deadline = Time.instant + timeout
+      arguments = [@frame.argument(role), @frame.argument(name), @frame.argument(exact), self_argument]
+      @frame.elements_for(@context_id, handle_call(DomScripts::BY_ROLE, arguments, deadline), deadline)
     end
 
     # The smallest rectangle around the element's border boxes, in CSS
@@ -288,12 +306,24 @@ module Crystalfaux
       raise ex
     end
 
+    # The handle as an argument of a call in execution context *context_id*
+    # of *frame*. Raises `HandleDisposed`, or `ForeignHandle` when the
+    # handle belongs to another context.
+    protected def argument_in(frame : Frame, context_id : String) : Protocol::Runtime::CallFunctionArgument
+      check_disposed
+      unless frame.same?(@frame) && context_id == @context_id
+        raise ForeignHandle.new("The element handle belongs to execution context #{@context_id} of frame #{@frame.id}, " \
+                                "not to #{context_id} of frame #{frame.id}")
+      end
+      self_argument
+    end
+
     private def self_argument : Protocol::Runtime::CallFunctionArgument
       Protocol::Runtime::CallFunctionArgument.new(object_id: @remote_object_id)
     end
 
     private def check_disposed : Nil
-      raise Error.new("The element handle is disposed") if @disposed.get
+      raise HandleDisposed.new("The element handle is disposed") if @disposed.get
     end
 
     private def detached : ElementDetached

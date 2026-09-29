@@ -103,6 +103,30 @@ module Crystalfaux
       @page.evaluate_in(self, expression, world, Time.instant + timeout)
     end
 
+    # Calls *function* in this frame's isolated world with the values of
+    # *args* as its arguments, and returns its value as JSON, as `#evaluate`
+    # does for an expression. An `ElementHandle` argument is the element;
+    # any other argument is sent as JSON.
+    #
+    # ```
+    # frame.evaluate("(dialog, button) => dialog.contains(button)", {dialog, button}) # => true
+    # frame.evaluate("(label, n) => label.repeat(n)", {"ab", 2})                      # => "abab"
+    # ```
+    #
+    # The arguments are a tuple, not a splat, because Crystal 1.21 takes a
+    # splat overload beside the expression overload for a redefinition.
+    #
+    # Each handle must belong to this frame's current document. Raises
+    # `HandleDisposed` for a disposed handle and `ForeignHandle` for a
+    # handle of another frame or document, before anything is sent.
+    # Otherwise raises as `#evaluate` does.
+    def evaluate(function : String, args : Tuple, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
+      deadline = Time.instant + timeout
+      context_id = current_context_id
+      arguments = call_arguments(context_id, args)
+      @page.value_of(call_function(context_id, function, arguments, deadline, by_value: true))
+    end
+
     # Returns the first element that CSS *selector* matches in this frame's
     # document, or `nil`.
     #
@@ -222,6 +246,22 @@ module Crystalfaux
         release(context_id, list_id, deadline)
       end
       properties.sort_by(&.name.to_i).compact_map { |property| element_for(context_id, property.value) }
+    end
+
+    # The `Runtime.callFunction` arguments for *values* in execution context
+    # *context_id*: an `ElementHandle` as its `objectId`, any other value as
+    # JSON. Checks every handle before the caller sends anything: Camoufox
+    # looks up an `objectId` only in the context of the call
+    # (`additions/juggler/content/Runtime.js`, `callFunction`).
+    protected def call_arguments(context_id : String, values : Tuple) : Array(Protocol::Runtime::CallFunctionArgument)
+      arguments = [] of Protocol::Runtime::CallFunctionArgument
+      values.each do |value|
+        arguments << case value
+        when ElementHandle then value.argument_in(self, context_id)
+        else                    Protocol::Runtime::CallFunctionArgument.new(value: JSON.parse(value.to_json))
+        end
+      end
+      arguments
     end
 
     # A `Runtime.callFunction` argument that holds *value* as JSON.

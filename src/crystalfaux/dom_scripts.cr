@@ -166,9 +166,12 @@ module Crystalfaux
       }
       JS
 
-    # The elements of the frame's document with ARIA role *role* and, when
-    # *name* is not `null`, that accessible name (`exact`: equal after
-    # whitespace is collapsed; otherwise a case-insensitive substring).
+    # The elements of the frame's document, or of the subtree under *root*
+    # when it is given, with ARIA role *role* and, when *name* is not
+    # `null`, that accessible name (`exact`: equal after whitespace is
+    # collapsed; otherwise a case-insensitive substring). *root* itself is
+    # not a match. Hiddenness and names still look outside *root*, for
+    # example at an `aria-hidden` ancestor or an `aria-labelledby` target.
     #
     # A small part of Playwright's `injected/roleUtils.ts`:
     #
@@ -191,7 +194,7 @@ module Crystalfaux
     # `aria-describedby`, CSS generated content, the full name algorithm
     # for referenced and embedded controls, and ARIA role inheritance.
     BY_ROLE = <<-'JS'
-      (role, name, exact) => {
+      (role, name, exact, root = document) => {
         const implicitRoles = [
           ['button', 'button, input[type=button], input[type=submit], input[type=reset], input[type=image]'],
           ['link', 'a[href], area[href]'],
@@ -263,7 +266,7 @@ module Crystalfaux
         const wanted = name === null ? null : normalize(name);
         const matches = candidate => wanted === null ||
           (exact ? candidate === wanted : candidate.toLowerCase().includes(wanted.toLowerCase()));
-        return Array.from(document.querySelectorAll('*'))
+        return Array.from(root.querySelectorAll('*'))
           .filter(el => roleOf(el) === role && !hidden(el) && matches(accessibleName(el, role)));
       }
       JS

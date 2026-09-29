@@ -190,6 +190,16 @@ module Crystalfaux
       main_frame.evaluate(expression, timeout, world: world)
     end
 
+    # Calls *function* in the main frame with the values of *args*, which
+    # can be element handles of the main frame. See `Frame#evaluate`.
+    #
+    # ```
+    # page.evaluate("(dialog, button) => dialog.contains(button)", {dialog, button}) # => true
+    # ```
+    def evaluate(function : String, args : Tuple, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : JSON::Any
+      main_frame.evaluate(function, args, timeout)
+    end
+
     # Runs `Frame#evaluate` for *frame*, a frame of this page.
     protected def evaluate_in(frame : Frame, expression : String, world : World, deadline : Time::Instant) : JSON::Any
       context_id = context_id_for(frame)

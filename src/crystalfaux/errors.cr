@@ -95,6 +95,23 @@ module Crystalfaux
   class ElementDetached < Error
   end
 
+  # Raised by a call on an `ElementHandle` after `ElementHandle#dispose`,
+  # and by an evaluation that gets a disposed handle as an argument. The
+  # evaluation sends nothing.
+  class HandleDisposed < Error
+  end
+
+  # Raised by an evaluation that gets an `ElementHandle` of another
+  # execution context as an argument: a handle of another frame, or of an
+  # earlier document of the same frame. The evaluation sends nothing.
+  #
+  # ```
+  # page.evaluate("el => el.id", {frame.query_selector("#go")})
+  # # raises Crystalfaux::ForeignHandle
+  # ```
+  class ForeignHandle < Error
+  end
+
   # Raised by a page, and by its waiting calls, after the page crashed.
   class PageCrashed < Error
   end
