@@ -207,11 +207,17 @@ module Crystalfaux
       nil
     end
 
-    # Hit-tests the element in its frame, then the frame in each ancestor
-    # at (*x*, *y*), the click point in the main frame's viewport. Returns
-    # `nil` when a click reaches the element, or the failed check.
+    # Hit-tests the element in its frame, then the frame in each ancestor,
+    # at (*x*, *y*), the click point in the main frame's viewport, mapped
+    # into each frame (`Frame#viewport_point`). The element's own frame is
+    # mapped too, so the test uses the point where the click lands, and a
+    # frame whose transform cannot be undone gets no click. Returns `nil`
+    # when a click reaches the element, or the failed check.
     private def hit_path_failure(x : Float64, y : Float64, deadline : Time::Instant) : String?
-      target = run(DomScripts::HIT_TARGET, [self_argument], deadline).as_s?
+      local = @frame.viewport_point(x, y, deadline)
+      return "the click point cannot be mapped into frame #{@frame.id}" unless local
+      arguments = [self_argument, @frame.argument(local[0]), @frame.argument(local[1])]
+      target = run(DomScripts::HIT_TARGET, arguments, deadline).as_s?
       return failed_check(target) unless target == "done"
       path = @frame.check_hit_path(x, y, deadline)
       failed_check(path) unless path == "done"

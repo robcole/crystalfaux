@@ -88,6 +88,25 @@ private PAGES = {
     <style>@keyframes slide { from { left: 0 } to { left: 300px } }</style>
     <div id="cover"></div>
     HTML
+  "/perspective" => <<-HTML,
+    <!doctype html><title>perspective</title>
+    <style>
+      body { margin: 0; }
+      iframe { position: absolute; left: 150px; top: 100px; width: 400px; height: 300px; border: 0;
+               transform: perspective(250px) rotateY(35deg); }
+    </style>
+    <iframe src="/perspective-inner"></iframe>
+    HTML
+  "/perspective-inner" => <<-HTML,
+    <!doctype html><title>perspective inner</title>
+    <style>
+      body { margin: 0; }
+      #target { position: absolute; left: 40px; top: 80px; width: 240px; height: 100px; }
+      #cover { position: absolute; left: 118px; top: 123px; width: 12px; height: 12px; }
+    </style>
+    <button id="target" onclick="document.body.dataset.clicked = 'yes'">Target</button>
+    <div id="cover" onclick="document.body.dataset.coverClicked = 'yes'"></div>
+    HTML
   "/nested" => <<-HTML,
     <!doctype html><title>nested</title>
     <style>
@@ -273,6 +292,26 @@ describe Crystalfaux::ElementHandle, tags: "browser" do
       target.click
       frame.evaluate("document.body.dataset.clicked").should eq(JSON::Any.new("yes"))
     end
+  ensure
+    browser.try &.close
+    server.try &.close
+  end
+
+  it "sends no click into a frame under a perspective transform" do
+    binary = camoufox_binary
+    server = ElementsServer.new
+    browser, page = open_page(binary)
+    page.goto("#{server.base_url}/perspective")
+    frame = first_child(page.main_frame)
+    target = frame.wait_for_selector("#target", timeout: 5.seconds).should_not(be_nil)
+
+    # The cover sits where the click would land, away from the button's
+    # untransformed centre.
+    expect_raises(Crystalfaux::TimeoutError, "cannot be mapped into frame #{frame.id}") do
+      target.click(timeout: 500.milliseconds)
+    end
+    frame.evaluate("document.body.dataset.clicked || null").should eq(JSON::Any.new(nil))
+    frame.evaluate("document.body.dataset.coverClicked || null").should eq(JSON::Any.new(nil))
   ensure
     browser.try &.close
     server.try &.close

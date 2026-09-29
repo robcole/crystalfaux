@@ -371,6 +371,7 @@ describe Crystalfaux::ElementHandle do
         when DomScripts::ACTIONABLE       then reply({result: {type: "string", value: "done"}})
         when DomScripts::HIT_TARGET       then reply(verdict("done"))
         when DomScripts::FRAME_HIT_TARGET then reply(verdict(%(covered by <div id="cover">)))
+        when DomScripts::FRAME_BOX        then reply({result: {type: "object", value: {width: 40, height: 20, left: 0, top: 0}}})
         else                                   raise "unexpected function #{function}"
         end
       end
@@ -380,6 +381,12 @@ describe Crystalfaux::ElementHandle do
       expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="cover">)) { handle.click(timeout: 100.milliseconds) }
 
       fake.request("Page.adoptNode")["params"].should eq(json_frame({frameId: "child-1", executionContextId: "id-3"}))
+      target_check = (1..8).each do
+        params = fake.request("Runtime.callFunction")["params"]
+        break params if params["functionDeclaration"] == DomScripts::HIT_TARGET
+      end.should_not(be_nil)
+      # The click point mapped into the child frame through its <iframe> quad.
+      target_check["args"].should eq(json_frame([{objectId: "obj-1"}, {value: 20}, {value: 10}]))
       frame_check = (1..8).each do
         params = fake.request("Runtime.callFunction")["params"]
         break params if params["functionDeclaration"] == DomScripts::FRAME_HIT_TARGET
@@ -420,7 +427,8 @@ describe Crystalfaux::ElementHandle do
         end
       end
 
-      expect_raises(Crystalfaux::TimeoutError, "cannot be mapped into frame child-1") { handle.click(timeout: 100.milliseconds) }
+      # The element's own frame is mapped first, through the same <iframe> quad.
+      expect_raises(Crystalfaux::TimeoutError, "cannot be mapped into frame grandchild-1") { handle.click(timeout: 100.milliseconds) }
       fake.methods.should_not contain("Page.dispatchMouseEvent")
     ensure
       browser.try &.close

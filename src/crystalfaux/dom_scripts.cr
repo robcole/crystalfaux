@@ -126,17 +126,14 @@ module Crystalfaux
       };
       JS
 
-    # Hit-tests the centre of the element's first box in its own frame, the
-    # first quad that `Page.getContentQuads` reports. Returns `HIT_TEST`'s
-    # result, or `"notconnected"`.
+    # Hit-tests the element at (*x*, *y*) of its own frame's viewport: the
+    # click point, mapped from the main frame's viewport. Returns
+    # `HIT_TEST`'s result, or `"notconnected"`.
     HIT_TARGET = <<-JS
-      el => {
+      (el, x, y) => {
         #{HIT_TEST}
         if (!el.isConnected) return 'notconnected';
-        const boxes = el.getClientRects();
-        if (!boxes.length) return 'element is not visible';
-        const box = boxes[0];
-        return hitTest(el, box.left + box.width / 2, box.top + box.height / 2);
+        return hitTest(el, x, y);
       }
       JS
 
