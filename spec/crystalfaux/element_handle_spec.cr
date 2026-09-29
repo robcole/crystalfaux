@@ -168,6 +168,102 @@ describe Crystalfaux::ElementHandle do
     end
   end
 
+  describe "#get_by_role" do
+    it "queries by role with the handle as the root" do
+      browser, fake = scripted_browser
+      _, dialog = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { reply({result: {type: "object", subtype: "array", objectId: "list-1"}}) }
+      fake.on("Runtime.getObjectProperties") do
+        reply({properties: [{name: "0", value: {type: "object", subtype: "node", objectId: "obj-close"}}]})
+      end
+
+      dialog.get_by_role("button", name: "Close").map(&.remote_object_id).should eq(["obj-close"])
+
+      params = fake.request("Runtime.callFunction")["params"]
+      params["executionContextId"].should eq("id-3")
+      params["functionDeclaration"].should eq(DomScripts::BY_ROLE)
+      params["args"].should eq(json_frame([{value: "button"}, {value: "Close"}, {value: true}, {objectId: "obj-1"}]))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "as an argument" do
+    it "passes other handles of the same context as objectId arguments" do
+      browser, fake = scripted_browser
+      page, dialog = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { reply(node("obj-2")) }
+      button = page.query_selector("button").should_not(be_nil)
+      fake.request("Runtime.callFunction")
+      fake.on("Runtime.callFunction") { reply({result: {type: "boolean", value: true}}) }
+
+      dialog.evaluate("(el, other, n) => el.contains(other) && n", button, 2).should eq(JSON::Any.new(true))
+      params = fake.request("Runtime.callFunction")["params"]
+      params["args"].should eq(json_frame([{objectId: "obj-1"}, {objectId: "obj-2"}, {value: 2}]))
+
+      page.evaluate("(a, b) => a.contains(b)", {dialog, button}).should eq(JSON::Any.new(true))
+      params = fake.request("Runtime.callFunction")["params"]
+      params["executionContextId"].should eq("id-3")
+      params["returnByValue"].should be_true
+      params["args"].should eq(json_frame([{objectId: "obj-1"}, {objectId: "obj-2"}]))
+
+      page.main_frame.evaluate("(label, n) => label.repeat(n)", {"ab", 2}, 1.second)
+      fake.request("Runtime.callFunction")["params"]["args"].should eq(json_frame([{value: "ab"}, {value: 2}]))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "rejects a disposed handle before it sends anything" do
+      browser, fake = scripted_browser
+      page, dialog = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { reply(node("obj-2")) }
+      button = page.query_selector("button").should_not(be_nil)
+      button.dispose
+
+      expect_raises(Crystalfaux::HandleDisposed) { dialog.evaluate("(el, other) => el.contains(other)", button) }
+      expect_raises(Crystalfaux::HandleDisposed) { page.evaluate("el => el.id", {button}) }
+      fake.methods.count("Runtime.callFunction").should eq(2)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "rejects a handle of another document before it sends anything" do
+      browser, fake = scripted_browser
+      page, stale = page_with_handle(browser, fake)
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+      fake.event("Runtime.executionContextCreated", {executionContextId: "id-11", auxData: {frameId: ProbeScript::FRAME_ID, name: ""}})
+      page.wait_for_events_for_spec
+      fake.on("Runtime.callFunction") { reply(node("obj-9")) }
+      fresh = page.query_selector("#go").should_not(be_nil)
+
+      expect_raises(Crystalfaux::ForeignHandle) { page.evaluate("el => el.id", {stale}) }
+      expect_raises(Crystalfaux::ForeignHandle) { fresh.evaluate("(el, other) => el === other", stale) }
+      fake.methods.count("Runtime.callFunction").should eq(2)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "rejects a handle of another frame before it sends anything" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.event("Page.frameAttached", {frameId: "child-1", parentFrameId: ProbeScript::FRAME_ID})
+      fake.event("Runtime.executionContextCreated", {executionContextId: "id-7", auxData: {frameId: "child-1", name: ""}})
+      page.wait_for_events_for_spec
+      fake.on("Runtime.callFunction") { reply(node("obj-1")) }
+      inner = page.main_frame.children.first.query_selector("#go").should_not(be_nil)
+
+      expect_raises(Crystalfaux::ForeignHandle) { page.evaluate("el => el.id", {inner}) }
+      fake.methods.count("Runtime.callFunction").should eq(1)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
   describe "reading" do
     it "reads the text, the attributes and the visibility by value" do
       browser, fake = scripted_browser

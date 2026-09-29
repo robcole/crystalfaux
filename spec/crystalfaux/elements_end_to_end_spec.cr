@@ -148,6 +148,17 @@ private PAGES = {
     <!doctype html><title>second</title><p id="late"></p>
     <script>setTimeout(() => { document.getElementById('late').textContent = 'ready'; }, 300)</script>
     HTML
+  "/dialogs" => <<-HTML,
+    <!doctype html><title>dialogs</title>
+    <div role="dialog" id="cart" aria-label="Cart">
+      <p>1 item</p>
+      <button onclick="document.body.dataset.closed = 'cart'">Close</button>
+    </div>
+    <div role="dialog" id="offers" aria-label="Offers">
+      <p>2 offers</p>
+      <button onclick="document.body.dataset.closed = 'offers'">Close</button>
+    </div>
+    HTML
   "/framed"             => framed_html("none"),
   "/framed-transformed" => framed_html("translateX(0px)"),
   "/framed-rotated"     => framed_html("rotate(8deg) scale(0.9)"),
@@ -249,6 +260,31 @@ describe Crystalfaux::ElementHandle, tags: "browser" do
     page.wait_for_selector("#specs", state: :hidden, timeout: 5.seconds).should be_nil
     dialog.visible?.should be_false
     page.get_by_role("dialog").should be_empty
+  ensure
+    browser.try &.close
+    server.try &.close
+  end
+
+  it "finds a role in one dialog and checks containment with handle arguments" do
+    binary = camoufox_binary
+    server = ElementsServer.new
+    browser, page = open_page(binary)
+    page.goto("#{server.base_url}/dialogs")
+    page.get_by_role("button", name: "Close").size.should eq(2)
+
+    offers = page.get_by_role("dialog", name: "Offers").first
+    closes = offers.get_by_role("button", name: "Close")
+    closes.size.should eq(1)
+    close = closes.first
+    offers.get_by_role("dialog").should be_empty # the root itself is not a match
+
+    cart = page.query_selector("#cart").should_not(be_nil)
+    page.evaluate("(dialog, button) => dialog.contains(button)", {offers, close}).should eq(JSON::Any.new(true))
+    page.evaluate("(dialog, button) => dialog.contains(button)", {cart, close}).should eq(JSON::Any.new(false))
+    cart.evaluate("(dialog, button) => dialog.contains(button)", close).should eq(JSON::Any.new(false))
+
+    close.click
+    page.evaluate("document.body.dataset.closed").should eq(JSON::Any.new("offers"))
   ensure
     browser.try &.close
     server.try &.close

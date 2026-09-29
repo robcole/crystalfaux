@@ -106,6 +106,20 @@ describe Crystalfaux::Protocol do
       Protocol::Runtime::CallFunctionArgument.new(object_id: "o1").to_json.should eq(%({"objectId":"o1"}))
     end
 
+    it "writes handles as objectId arguments beside values" do
+      arguments = [
+        Protocol::Runtime::CallFunctionArgument.new(object_id: "obj-1"),
+        Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new("Close")),
+        Protocol::Runtime::CallFunctionArgument.new(object_id: "obj-2"),
+      ]
+      request = Protocol::Runtime::CallFunction.new("id-3", "(a, name, b) => a.contains(b)", arguments, return_by_value: true)
+
+      JSON.parse(request.to_json).should eq(JSON.parse(<<-JSON))
+        {"executionContextId": "id-3", "functionDeclaration": "(a, name, b) => a.contains(b)", "returnByValue": true,
+         "args": [{"objectId": "obj-1"}, {"value": "Close"}, {"objectId": "obj-2"}]}
+        JSON
+    end
+
     it "rejects an enum value the schema does not list" do
       expect_raises(JSON::SerializableError, /Unknown LifecycleEvent "unload"/) do
         Protocol::Page::EventFired.from_json(%({"frameId":"f","name":"unload"}))
