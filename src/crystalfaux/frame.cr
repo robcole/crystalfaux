@@ -372,11 +372,16 @@ module Crystalfaux
     # after *timeout*.
     #
     # *guard* runs before each try, outside the rescue of the try, so that
-    # what it raises ends the wait unchanged.
+    # what it raises ends the wait unchanged. A guard that uses up the
+    # time ends the wait before the try: an expired deadline does not stop
+    # `Page#call` from sending the request, and the browser runs it.
     private def poll(description : String, timeout : Time::Span, interval : Time::Span, guard : Guard?, &)
       deadline = Time.instant + timeout
       loop do
-        guard.try &.call
+        if guard
+          guard.call
+          break unless (deadline - Time.instant).positive?
+        end
         begin
           result = yield deadline
           return result unless result.nil?
