@@ -4,21 +4,30 @@ Copyright (c) 2026 Rob Cole. Licensed under the MIT License (see LICENSE).
 This software includes third-party material under other licences. Each
 file named below carries its own notice.
 
+crystalfaux is MIT except for the files listed below. The
+Camoufox-derived files are under the Mozilla Public License 2.0, and the
+Playwright-derived files are under the Apache License 2.0.
+
 Camoufox (https://github.com/daijro/camoufox), commit
 eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a. Copyright the Camoufox authors.
+Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/). The MPL-2.0 is
+a file-level copyleft: a modified copy of one of these files must stay
+under the MPL-2.0, and its source must be available.
 
-- protocol/Protocol.js: copied without changes. Mozilla Public License 2.0
-  (https://mozilla.org/MPL/2.0/); the file keeps its MPL header.
+- protocol/Protocol.js: copied without changes. The file keeps its MPL
+  header.
 - data/camoufox/properties.json: copied without changes from
-  settings/properties.json. The repository root LICENSE is MPL-2.0.
+  settings/properties.json.
 - data/camoufox/fonts.json: copied without changes from
   pythonlib/camoufox/fonts.json.
-- src/crystalfaux/fingerprint/*.cr and src/crystalfaux/fetch/{platform,build}.cr:
-  logic translated from pythonlib/camoufox/*.py.
-
-  pythonlib/pyproject.toml declares the camoufox Python package MIT, in a
-  repository whose root LICENSE is MPL-2.0. data/camoufox/README.md records
-  which metadata applies to each file.
+  data/camoufox/NOTICE holds the MPL-2.0 notice for both JSON files.
+- src/crystalfaux/fingerprint/config.cr,
+  src/crystalfaux/fingerprint/geometry.cr,
+  src/crystalfaux/fingerprint/os.cr,
+  src/crystalfaux/fingerprint/properties.cr,
+  src/crystalfaux/fetch/build.cr, src/crystalfaux/fetch/platform.cr:
+  logic translated from pythonlib/camoufox/*.py. Each file carries the
+  MPL-2.0 notice and names its source files.
 
 Playwright (https://github.com/microsoft/playwright). Apache License 2.0
 (https://www.apache.org/licenses/LICENSE-2.0).

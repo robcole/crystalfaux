@@ -1,10 +1,13 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
 # Portions of this file are translated to Crystal from Camoufox
 # (https://github.com/daijro/camoufox, commit eb5dc3bc):
 # - `pythonlib/camoufox/pkgman.py`
 #
-# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
-# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
-# `data/camoufox/README.md`.
+# Copyright the Camoufox authors. Like all Camoufox-derived files in
+# crystalfaux, this file is under the MPL-2.0. See `NOTICE`.
 
 module Crystalfaux::Fetch
   # An operating system and architecture, named as in Camoufox release

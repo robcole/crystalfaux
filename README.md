@@ -288,18 +288,24 @@ These limits are known. Some are deliberate; others are future work.
 
 ## Licence
 
-crystalfaux is available under the MIT License (see [`LICENSE`](LICENSE)).
-Some files come from other projects and keep their own licences. The
+crystalfaux is available under the MIT License (see [`LICENSE`](LICENSE)),
+except for the files that come from other projects. The
 [`NOTICE`](NOTICE) file lists them:
 
-- `protocol/Protocol.js` is a copy of Camoufox's Juggler schema under the
-  Mozilla Public License 2.0. It keeps its MPL header.
-- `data/camoufox/` holds copies of two Camoufox data files.
-  [`data/camoufox/README.md`](data/camoufox/README.md) records the licence
-  metadata of each file.
-- Some files translate logic from Camoufox's Python package
-  (`pythonlib/`). Its `pyproject.toml` declares MIT, and the root `LICENSE`
-  of the Camoufox repository is MPL-2.0. Each file names its source.
-- Some files translate logic from Playwright (Apache License 2.0), such as
-  the keyboard layout and the input rules. Each file carries a notice that
+- Camoufox-derived files are under the Mozilla Public License 2.0:
+  - `protocol/Protocol.js`, a copy of the Juggler schema. It keeps its MPL
+    header.
+  - `data/camoufox/properties.json` and `fonts.json`, copies of two data
+    files. [`data/camoufox/NOTICE`](data/camoufox/NOTICE) holds their
+    notice.
+  - `src/crystalfaux/fingerprint/config.cr`, `geometry.cr`, `os.cr`,
+    `properties.cr`, and `src/crystalfaux/fetch/build.cr` and
+    `platform.cr`, which translate logic from Camoufox's Python package.
+    Each file carries the MPL-2.0 notice.
+
+  The MPL-2.0 is a file-level copyleft. If you change one of these files,
+  the changed file must stay under the MPL-2.0 and its source must be
+  available. The rest of crystalfaux stays MIT.
+- Playwright-derived files are under the Apache License 2.0, such as the
+  keyboard layout and the input rules. Each file carries a notice that
   names its source files.

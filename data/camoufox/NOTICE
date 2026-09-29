@@ -1,0 +1,13 @@
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+This notice applies to these files in this directory, which are copied
+without changes from Camoufox (https://github.com/daijro/camoufox) at
+commit eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a:
+
+- properties.json (from settings/properties.json)
+- fonts.json (from pythonlib/camoufox/fonts.json)
+
+Copyright the Camoufox authors. JSON files cannot carry a comment header,
+so this file holds the notice for them.

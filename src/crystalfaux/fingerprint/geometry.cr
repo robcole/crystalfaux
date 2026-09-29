@@ -1,10 +1,13 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+#
 # Portions of this file are translated to Crystal from Camoufox
 # (https://github.com/daijro/camoufox, commit eb5dc3bc):
 # - `pythonlib/camoufox/fingerprints.py`
 #
-# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
-# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
-# `data/camoufox/README.md`.
+# Copyright the Camoufox authors. Like all Camoufox-derived files in
+# crystalfaux, this file is under the MPL-2.0. See `NOTICE`.
 
 module Crystalfaux::Fingerprint
   # Makes the screen and window keys of a config describe a possible
@@ -14,9 +17,7 @@ module Crystalfaux::Fingerprint
   # Ported from Camoufox `pythonlib/camoufox/fingerprints.py`:
   # `fix_screen_no_taskbar`, `clamp_window_dimensions` and
   # `clamp_window_position`, applied in that order as `launch_options()`
-  # does. Keys that are absent stay absent. That file belongs to the Python
-  # package, which `pythonlib/pyproject.toml` declares MIT, in a repository
-  # whose root `LICENSE` is MPL-2.0; `data/camoufox/README.md` records both.
+  # does. Keys that are absent stay absent.
   module Geometry
     AXES = {"Width", "Height"}
 
