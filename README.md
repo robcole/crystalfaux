@@ -31,6 +31,7 @@ evaluate JavaScript, take screenshots, send input and intercept requests.
 3. Build the `crystalfaux` command and download Camoufox:
 
    ```sh
+   mkdir -p bin
    crystal build lib/crystalfaux/src/cli.cr -o bin/crystalfaux
    bin/crystalfaux fetch        # the newest supported build
    bin/crystalfaux list         # the builds for this platform

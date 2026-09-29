@@ -102,8 +102,9 @@ module Crystalfaux
     end
 
     # Launches the browser with a fingerprint *config* and Firefox *prefs*,
-    # which replace those of *options*. Both reach the browser in its
-    # environment (`Launcher.environment`), so they apply from startup.
+    # which replace those of *options*. Both travel to the browser in its
+    # environment (`Launcher.environment`). The browser applies the config
+    # at startup; see the note below for *prefs*.
     #
     # ```
     # config = Crystalfaux::Fingerprint::Config.for(os: :mac, screen: Crystalfaux::Fingerprint::Screen.new(1512, 982),

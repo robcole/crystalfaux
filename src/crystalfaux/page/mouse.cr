@@ -108,8 +108,8 @@ module Crystalfaux
       # Waits for an animation frame first: wheel events reach the
       # compositor, which must have the current layout to hit-test them
       # (Playwright `server/firefox/ffInput.ts`, `RawMouseImpl.wheel`).
-      # Playwright waits in its utility world; this waits in the page's own
-      # world, which is the one `Page#evaluate` uses.
+      # Playwright waits in its utility world; this waits in the isolated
+      # world, the default world of `Page#evaluate`.
       def wheel(delta_x : Float64, delta_y : Float64) : Nil
         @page.evaluate(ANIMATION_FRAME_SCRIPT)
         x, y = @lock.synchronize { {@x, @y} }

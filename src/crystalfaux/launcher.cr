@@ -35,20 +35,22 @@ module Crystalfaux::Launcher
   # The prefixes of the variables that carry the config and prefs. The
   # launcher removes inherited ones, because Camoufox joins every
   # `CAMOU_CONFIG_n` it finds (`additions/camoucfg/MaskConfig.hpp`, which
-  # also reads an unchunked `CAMOU_CONFIG`), and `settings/camoufox.cfg`
-  # does the same for `CAMOU_PREFS_n`. A stale `CAMOU_CONFIG_3` from the
-  # parent would be appended to a two-chunk config.
+  # also reads an unchunked `CAMOU_CONFIG`), and the `settings/camoufox.cfg`
+  # of newer builds does the same for `CAMOU_PREFS_n`. A stale
+  # `CAMOU_CONFIG_3` from the parent would be appended to a two-chunk
+  # config.
   RESERVED_PREFIXES = {"CAMOU_CONFIG", "CAMOU_PREFS"}
 
   # Returns the complete environment of the browser for *options*: *base*
   # without inherited `CAMOU_CONFIG*` and `CAMOU_PREFS*` variables, then the
   # config and prefs as JSON chunks, then `options.env`.
   #
-  # The prefs must travel here, not in `Browser.enable`: `camoufox.cfg`
-  # applies them at startup, before Firefox caches some of them. Only
-  # Camoufox builds newer than the supported range read `CAMOU_PREFS_n`;
-  # the supported `152.0.4-beta.30` and `beta.31` builds ignore it, so the
-  # prefs have no effect there (see `Options`).
+  # The prefs are serialized here as `CAMOU_PREFS_n`. Camoufox builds newer
+  # than the supported range read these variables in `camoufox.cfg` and
+  # apply the prefs at startup. The supported `152.0.4-beta.30` and
+  # `beta.31` builds do not read them, so the prefs have no effect there
+  # (see `Options`). A fix that also sends them through `Browser.enable`
+  # `userPrefs` is scheduled.
   #
   # Migration: earlier versions of this method returned only the variables to
   # add (the chunks and `options.env`), and the child inherited the rest.
