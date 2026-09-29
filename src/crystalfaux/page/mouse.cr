@@ -117,11 +117,21 @@ module Crystalfaux
       # The mouse does not press again or retry. When the page or the
       # connection is gone, no release can be sent, and the call raises
       # that failure, such as `PageClosed`.
+      #
+      # *guard* runs after the move and before each press; see `Guard`.
+      # When it raises, the mouse sends no press and the call raises the
+      # guard's exception unchanged. A button that an earlier click of a
+      # double click pressed is released already.
+      #
+      # ```
+      # page.mouse.click(120, 48, guard: -> { raise Blocked.new if challenge?(page) })
+      # ```
       def click(x : Float64, y : Float64, button : Button = :left, click_count : Int32 = 1, *,
-                timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+                timeout : Time::Span = Browser::DEFAULT_TIMEOUT, guard : Guard? = nil) : Nil
         deadline = Time.instant + timeout
         move_to(x, y, 1, deadline)
         (1..click_count).each do |count|
+          guard.try &.call
           press(button, count, deadline)
           release_pressed(button, count, deadline)
         end

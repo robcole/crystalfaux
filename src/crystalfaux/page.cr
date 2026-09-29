@@ -267,15 +267,15 @@ module Crystalfaux
     # Evaluates *expression* in the main frame until it is truthy and
     # returns that value. See `Frame#wait_for_function`.
     def wait_for_function(expression : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT, *,
-                          polling : Time::Span = Frame::POLLING, world : World = :isolated) : JSON::Any
-      main_frame.wait_for_function(expression, timeout, polling: polling, world: world)
+                          polling : Time::Span = Frame::POLLING, world : World = :isolated, guard : Guard? = nil) : JSON::Any
+      main_frame.wait_for_function(expression, timeout, polling: polling, world: world, guard: guard)
     end
 
     # Waits until the element that CSS *selector* matches in the main frame
     # is in *state*. See `Frame#wait_for_selector`.
     def wait_for_selector(selector : String, *, state : ElementState = :visible,
-                          timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : ElementHandle?
-      main_frame.wait_for_selector(selector, state: state, timeout: timeout)
+                          timeout : Time::Span = Browser::DEFAULT_TIMEOUT, guard : Guard? = nil) : ElementHandle?
+      main_frame.wait_for_selector(selector, state: state, timeout: timeout, guard: guard)
     end
 
     # Returns the elements of the main frame with ARIA *role* and accessible

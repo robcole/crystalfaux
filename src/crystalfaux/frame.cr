@@ -167,9 +167,12 @@ module Crystalfaux
     #
     # Raises `TimeoutError` when the value is not truthy after *timeout*,
     # and `EvaluationError` at once when the script throws.
+    #
+    # *guard* runs before each poll; see `Guard`. When it raises, the wait
+    # ends with the guard's exception unchanged.
     def wait_for_function(expression : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT, *,
-                          polling : Time::Span = POLLING, world : World = :isolated) : JSON::Any
-      poll("Waiting for #{expression.inspect}", timeout, polling) do |deadline|
+                          polling : Time::Span = POLLING, world : World = :isolated, guard : Guard? = nil) : JSON::Any
+      poll("Waiting for #{expression.inspect}", timeout, polling, guard) do |deadline|
         value = @page.evaluate_in(self, expression, world, deadline)
         value if truthy?(value)
       end
@@ -187,10 +190,11 @@ module Crystalfaux
     #
     # Checks every `POLLING`, and goes on through navigations as
     # `#wait_for_function` does. Raises `TimeoutError` after *timeout*.
+    # *guard* runs before each check, as for `#wait_for_function`.
     def wait_for_selector(selector : String, *, state : ElementState = :visible,
-                          timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : ElementHandle?
+                          timeout : Time::Span = Browser::DEFAULT_TIMEOUT, guard : Guard? = nil) : ElementHandle?
       arguments = [argument(selector), argument(state.script_name)]
-      found = poll("Waiting for #{selector.inspect} to be #{state.script_name}", timeout, POLLING) do |deadline|
+      found = poll("Waiting for #{selector.inspect} to be #{state.script_name}", timeout, POLLING, guard) do |deadline|
         context_id = current_context_id
         remote = call_function(context_id, DomScripts::WAIT_FOR_SELECTOR, arguments, deadline, by_value: false)
         element_for(context_id, remote) || (remote.try(&.value).try(&.as_bool?) || nil)
@@ -366,9 +370,13 @@ module Crystalfaux
     # other than `nil`, and returns it. A try that loses its execution
     # context counts as `nil`. Raises `TimeoutError` with *description*
     # after *timeout*.
-    private def poll(description : String, timeout : Time::Span, interval : Time::Span, &)
+    #
+    # *guard* runs before each try, outside the rescue of the try, so that
+    # what it raises ends the wait unchanged.
+    private def poll(description : String, timeout : Time::Span, interval : Time::Span, guard : Guard?, &)
       deadline = Time.instant + timeout
       loop do
+        guard.try &.call
         begin
           result = yield deadline
           return result unless result.nil?

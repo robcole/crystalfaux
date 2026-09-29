@@ -54,6 +54,16 @@ module Crystalfaux
     # object id that no context of the frame has (`unsafeObject`).
     UNKNOWN_OBJECT_REASON = "Cannot find object with id"
 
+    # Stops a click between the move and the press when the element no
+    # longer gets the click there. *check* says why.
+    private class PressWithheld < Exception
+      getter check : String
+
+      def initialize(@check : String)
+        super("The press was not sent: #{@check}")
+      end
+    end
+
     # The frame whose document holds the element.
     getter frame : Frame
 
@@ -178,18 +188,45 @@ module Crystalfaux
     # `covered by <div id="cover">`, and `ElementDetached` at once when the
     # node left its document.
     #
-    # Once the checks pass, the click is not tried again. When the mouse
-    # click then times out, the `TimeoutError` says which event did not
-    # finish, as `Page::Mouse#click` reports it; a pressed button is
-    # released.
-    def click(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+    # After the mouse moves to the point, the click hit-tests the element
+    # again before it presses: a page can cover the element when the mouse
+    # comes near. When another element then gets the click, the mouse does
+    # not press and the checks are tried again.
+    #
+    # *guard* runs before each try of the checks, and after the move before
+    # the press; see `Guard`. When it raises, nothing more is sent and the
+    # click raises the guard's exception unchanged.
+    #
+    # ```
+    # button.click(guard: -> { raise Blocked.new if page.query_selector("#px-captcha") })
+    # ```
+    #
+    # Once the mouse presses, the click is not tried again. When the mouse
+    # click then times out, the `TimeoutError` names the input stage, as
+    # `Page::Mouse#click` reports it, which also tries to release a pressed
+    # button.
+    def click(timeout : Time::Span = Browser::DEFAULT_TIMEOUT, *, guard : Guard? = nil) : Nil
       deadline = Time.instant + timeout
-      x, y = clickable_point(deadline, timeout)
-      begin
-        @frame.page.mouse.click(x, y, timeout: deadline - Time.instant)
-      rescue ex : TimeoutError
-        raise TimeoutError.new("Clicking the element timed out after #{timeout}, after its checks passed: #{ex.message}", cause: ex)
+      reason = "no check finished"
+      RETRY_WAITS.each.chain(Iterator.of(RETRY_WAITS.last)).each do |wait|
+        guard.try &.call
+        begin
+          checked = check_click(deadline)
+        rescue TimeoutError
+          break
+        end
+        if checked.is_a?(String)
+          reason = checked
+        else
+          withheld = click_at(checked, deadline, timeout, guard)
+          return unless withheld
+          reason = withheld
+        end
+        remaining = deadline - Time.instant
+        break unless remaining.positive?
+        sleep({wait, remaining}.min)
       end
+      raise TimeoutError.new("Clicking the element timed out after #{timeout}: #{reason}")
     end
 
     # Releases the handle in the page. Safe to call more than once; later
@@ -204,24 +241,43 @@ module Crystalfaux
       # The browser released the handle with its context or page.
     end
 
-    # Runs the checks of `#click` until they pass, and returns the point to
-    # click. Raises `TimeoutError` with the last failed check when
-    # *deadline* passes first.
-    private def clickable_point(deadline : Time::Instant, timeout : Time::Span) : {Float64, Float64}
-      reason = "no check finished"
-      RETRY_WAITS.each.chain(Iterator.of(RETRY_WAITS.last)).each do |wait|
+    # Moves the mouse to *point* and clicks there, unless *guard* raises or
+    # the element no longer gets the click once the mouse is there. Returns
+    # `nil` when the mouse pressed, or the failed check when it did not.
+    #
+    # Both run in the mouse's guard, between the move and the press. The
+    # mouse raises what the guard raises; `PressWithheld` carries the failed
+    # check out, and the caller's own exception leaves unchanged, also a
+    # `TimeoutError`.
+    private def click_at(point : {Float64, Float64}, deadline : Time::Instant, timeout : Time::Span,
+                         guard : Guard?) : String?
+      x, y = point
+      guard_error : Exception? = nil
+      before_press = -> do
         begin
-          checked = check_click(deadline)
-        rescue TimeoutError
-          break
+          guard.try &.call
+        rescue ex
+          guard_error = ex
+          raise ex
         end
-        return checked unless checked.is_a?(String)
-        reason = checked
-        remaining = deadline - Time.instant
-        break unless remaining.positive?
-        sleep({wait, remaining}.min)
+        failure = recheck_after_move(x, y, deadline)
+        raise PressWithheld.new(failure) if failure
       end
-      raise TimeoutError.new("Clicking the element timed out after #{timeout}: #{reason}")
+      @frame.page.mouse.click(x, y, timeout: deadline - Time.instant, guard: before_press)
+      nil
+    rescue ex : PressWithheld
+      ex.check
+    rescue ex : TimeoutError
+      raise ex if ex.same?(guard_error)
+      raise TimeoutError.new("Clicking the element timed out after #{timeout}, after its checks passed: #{ex.message}", cause: ex)
+    end
+
+    # The hit test of `#check_click` at the mouse's point after the move.
+    # A test that the deadline stops is a failed check: no press without it.
+    private def recheck_after_move(x : Float64, y : Float64, deadline : Time::Instant) : String?
+      hit_path_failure(x, y, deadline)
+    rescue TimeoutError
+      "the hit test after the move did not finish"
     end
 
     # One try of the checks of `#click`: returns the point to click, or the

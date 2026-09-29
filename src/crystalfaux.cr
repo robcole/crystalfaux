@@ -5,6 +5,7 @@ module Crystalfaux
 end
 
 require "./crystalfaux/errors"
+require "./crystalfaux/guard"
 require "./crystalfaux/juggler/*"
 require "./crystalfaux/launcher"
 require "./crystalfaux/launcher/*"
