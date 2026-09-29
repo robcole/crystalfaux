@@ -112,4 +112,22 @@ describe Crystalfaux::Protocol do
       end
     end
   end
+
+  describe "Network::HTTPHeader.to_http" do
+    it "splits the newline-joined values of a repeated response header" do
+      params = JSON.parse(<<-'JSON')
+        {"securityDetails":null,"requestId":"r1","fromCache":false,"status":200,"statusText":"OK",
+         "headers":[{"name":"Content-Type","value":"text/html"},{"name":"Set-Cookie","value":"a=1; Path=/\nb=2; Path=/"}],
+         "timing":{"startTime":0,"domainLookupStart":0,"domainLookupEnd":0,"connectStart":0,
+                   "secureConnectionStart":0,"connectEnd":0,"requestStart":0,"responseStart":0},
+         "fromServiceWorker":false}
+        JSON
+      event = Protocol.decode(Protocol::Network::ResponseReceived, params)
+
+      headers = Protocol::Network::HTTPHeader.to_http(event.headers)
+
+      headers.get("Set-Cookie").should eq(["a=1; Path=/", "b=2; Path=/"])
+      headers.get("Content-Type").should eq(["text/html"])
+    end
+  end
 end

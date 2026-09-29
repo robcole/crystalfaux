@@ -15,11 +15,12 @@ private def request_event(request_id : String, url : String, *, intercepted : Bo
   }
 end
 
-private def response_event(request_id : String, status : Int32 = 200)
+private def response_event(request_id : String, status : Int32 = 200,
+                           headers = [{name: "Content-Type", value: "text/plain"}])
   zero = 0.0
   {
     securityDetails: nil, requestId: request_id, fromCache: false, status: status, statusText: "OK",
-    headers: [{name: "Content-Type", value: "text/plain"}], fromServiceWorker: false,
+    headers: headers, fromServiceWorker: false,
     timing: {startTime: zero, domainLookupStart: zero, domainLookupEnd: zero, connectStart: zero,
              secureConnectionStart: zero, connectEnd: zero, requestStart: zero, responseStart: zero},
   }
@@ -283,6 +284,23 @@ describe "network" do
       receive_within(body).should eq(JSON::Any.new("hello r1"))
       fake.request("Network.getResponseBody")["sessionId"].should eq(ProbeScript::SESSION_ID)
       response.text.should eq("hello r1")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "passes a response whose repeated Set-Cookie values Juggler joined with a newline" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      responses = Channel(Crystalfaux::Response).new(1)
+      page.on_response { |response| responses.send(response) }
+
+      fake.event("Network.requestWillBeSent", request_event("r1", "http://example.test/a", intercepted: false))
+      fake.event("Network.responseReceived",
+        response_event("r1", headers: [{name: "Set-Cookie", value: "a=1; Path=/\nb=2; Path=/"}]))
+      response = receive_within(responses)
+
+      response.headers.get("Set-Cookie").should eq(["a=1; Path=/", "b=2; Path=/"])
     ensure
       browser.try &.close
       fake.try &.close

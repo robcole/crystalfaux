@@ -1,4 +1,5 @@
 require "../../spec_helper"
+require "log/spec"
 
 # Pending replies are internal state with no public view; this spec-only
 # reader lets the specs prove a failed call releases its entry.
@@ -343,6 +344,27 @@ describe Crystalfaux::Juggler::Connection do
       peer.event("Page.eventFired", {name: "load"}, "s1")
 
       receive_within(names).should eq("load")
+    ensure
+      connection.try &.close
+      peer.try &.close
+    end
+    it "logs the frame when a handler raises" do
+      connection, peer = connected_pair
+      names = Channel(String).new(10)
+      connection.on("Page.eventFired", "s1") do |params|
+        name = params["name"].as_s
+        raise "handler failed" if name == "bad"
+        names.send(name)
+      end
+
+      Log.capture("crystalfaux.juggler") do |logs|
+        peer.event("Page.eventFired", {name: "bad"}, "s1")
+        peer.event("Page.eventFired", {name: "load"}, "s1")
+        receive_within(names)
+
+        logs.check(:error, /Page\.eventFired raised on frame .*"name":"bad"/)
+        logs.entry.exception.try(&.message).should eq("handler failed")
+      end
     ensure
       connection.try &.close
       peer.try &.close

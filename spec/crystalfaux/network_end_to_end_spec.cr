@@ -1,8 +1,9 @@
 require "../spec_helper"
 require "http/server"
 
-# Serves a page with an image, records each request path with its
-# `X-Crystalfaux` header, and records the bodies posted to `/submit`.
+# Serves a page with an image and a page that sets two cookies, records
+# each request path with its `X-Crystalfaux` header, and records the
+# bodies posted to `/submit`.
 private class SiteServer
   getter base_url : String
   getter posts = Channel(String).new(8)
@@ -18,6 +19,11 @@ private class SiteServer
       when "/pixel.png"
         context.response.content_type = "image/png"
         context.response.print "not really a png"
+      when "/cookies"
+        context.response.content_type = "text/html"
+        context.response.headers.add("Set-Cookie", "first=1; Path=/")
+        context.response.headers.add("Set-Cookie", "second=2; Path=/")
+        context.response.print "<title>cookies</title>"
       when "/submit"
         @posts.send(context.request.body.try(&.gets_to_end) || "")
       else
@@ -91,6 +97,26 @@ describe "network", tags: "browser" do
     page.evaluate("document.cookie").should eq(JSON::Any.new("flavour=oat"))
     context.clear_cookies
     context.cookies.should be_empty
+  ensure
+    browser.try &.close
+    site.try &.close
+  end
+
+  it "passes a response with two Set-Cookie headers and keeps both cookies against a real Camoufox" do
+    options = Crystalfaux::Launcher::Options.new(executable: camoufox_binary, headless: true)
+    site = SiteServer.new
+    browser = Crystalfaux::Browser.launch(options)
+    context = browser.new_context
+    page = context.new_page
+    set_cookies = Channel(Array(String)).new(1)
+    page.on_response do |response|
+      set_cookies.send(response.headers.get("Set-Cookie")) if response.url.ends_with?("/cookies")
+    end
+
+    page.goto("#{site.base_url}/cookies")
+
+    receive_within(set_cookies, 5.seconds).should eq(["first=1; Path=/", "second=2; Path=/"])
+    context.cookies.map { |cookie| {cookie.name, cookie.value} }.sort!.should eq([{"first", "1"}, {"second", "2"}])
   ensure
     browser.try &.close
     site.try &.close
