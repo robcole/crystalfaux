@@ -95,19 +95,24 @@ module Crystalfaux
       # double click.
       #
       # *timeout* covers all the events. Raises `TimeoutError` when it
-      # passes. After that the mouse starts no other event, but a pressed
-      # button is always released, so no button stays down. The release
-      # of a sent press can take up to `RELEASE_TIMEOUT` after *timeout*.
+      # passes, also when the click then finishes. After that the mouse
+      # starts no other event, but it tries to release a pressed button and
+      # always stops holding it itself. The browser can still hold the
+      # button when that release fails or its delivery is uncertain. The
+      # release of a sent press can take up to `RELEASE_TIMEOUT` after
+      # *timeout*.
       #
       # - When the deadline passes before a press, the press is not sent,
       #   and the message says so.
       # - When a press was sent, a failure of the press or the deadline
       #   passing before the release makes the mouse send the release with
       #   its own allowance, `RELEASE_TIMEOUT`. The `TimeoutError` then says
-      #   that the click is partial, and whether the release failed. When
-      #   the reply of a press or release did not come, the event may or may
-      #   not have reached the page; the message says that delivery is
-      #   uncertain.
+      #   that the click is partial, and whether the release failed.
+      # - When the reply of a press or release did not come, the event may
+      #   or may not have reached the page; the message says that delivery
+      #   is uncertain.
+      # - When the release reply comes after the deadline, the click is
+      #   complete but late, and raises `TimeoutError` that says so.
       #
       # The mouse does not press again or retry. When the page or the
       # connection is gone, no release can be sent, and the call raises
@@ -167,6 +172,11 @@ module Crystalfaux
       # acknowledged. The release is part of the action that the press
       # started, so it is sent also when the deadline has passed, with
       # `RELEASE_TIMEOUT`; the click then raises `TimeoutError`.
+      #
+      # A release sent in time also waits up to `RELEASE_TIMEOUT` for its
+      # reply, so that `Page#dispatch` cannot refuse it between the check
+      # here and the send. When the reply comes after *deadline*, the click
+      # raises `TimeoutError` although it finished.
       private def release_pressed(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
         unless (deadline - Time.instant).positive?
           raise abandon_press(TimeoutError.new("The deadline passed"), button, click_count,
@@ -174,6 +184,8 @@ module Crystalfaux
         end
         release_deadline = {deadline, Time.instant + RELEASE_TIMEOUT}.max
         send_release(button, click_count, release_deadline)
+        return if (deadline - Time.instant).positive?
+        raise TimeoutError.new("The reply to the mouseup event came after the deadline; the click finished late")
       end
 
       private def release(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
