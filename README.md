@@ -196,7 +196,29 @@ handle raises `HandleDisposed`, and a handle of another frame or document
 raises `ForeignHandle`. Nothing is sent to the browser then.
 
 A covered button does not get the click. The `TimeoutError` names the
-element on top, for example `covered by <div id="cover">`.
+element on top, for example `covered by <div id="cover">`. `click` does
+the hit test again after the mouse moves and before it presses, because a
+page can cover the element when the mouse comes near.
+
+A guard is your own check inside a click or a wait. It is a `Proc` that
+raises to stop the action. `click` runs it before each try of the checks
+and after the move, before the press. A wait runs it before each poll.
+When the guard raises, no press or poll is sent, and you get the guard's
+exception unchanged. The guard's time counts against the timeout.
+
+```crystal
+class Blocked < Exception
+end
+
+guard = -> { raise Blocked.new("challenge") if page.query_selector("#px-captcha") }
+
+begin
+  page.wait_for_selector(".sku-item", timeout: 30.seconds, guard: guard)
+  page.get_by_role("button", name: "More").first.click(guard: guard)
+rescue Blocked
+  # Stop: the page shows a challenge, and it got no click.
+end
+```
 
 A handle belongs to the document it was found in. After a navigation, its
 calls raise `ExecutionContextDestroyed`. When the page replaces the node,
