@@ -5,6 +5,13 @@ private def params_of(fake : ScriptedBrowser, method : String, count : Int32) : 
   Array.new(count) { fake.request(method)["params"] }
 end
 
+# Acknowledges each mouse event except `mousedown`, whose reply never comes.
+private def withhold_press(fake : ScriptedBrowser) : Nil
+  fake.on("Page.dispatchMouseEvent") do |request|
+    request["params"]["type"] == "mousedown" ? [] of JSON::Any : [json_frame({id: 0})]
+  end
+end
+
 describe Crystalfaux::Page::Mouse do
   it "clicks with a move, a down and an up at the point" do
     browser, fake = scripted_browser
@@ -98,5 +105,97 @@ describe Crystalfaux::Page::Mouse do
   ensure
     browser.try &.close
     fake.try &.close
+  end
+
+  describe "when the press is interrupted" do
+    it "releases the button once when the press is not acknowledged in time" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      withhold_press(fake)
+      page.keyboard.down("Shift")
+
+      error = expect_raises(Crystalfaux::TimeoutError) { page.mouse.click(10, 20, :right, timeout: 200.milliseconds) }
+      page.mouse.move(30, 40)
+
+      message = error.message.to_s
+      message.should contain("mousedown")
+      message.should contain("uncertain")
+      params_of(fake, "Page.dispatchMouseEvent", 4).should eq([
+        json_frame({type: "mousemove", button: 0, x: 10.0, y: 20.0, modifiers: 4, buttons: 0}),
+        json_frame({type: "mousedown", button: 2, x: 10.0, y: 20.0, modifiers: 4, clickCount: 1, buttons: 2}),
+        json_frame({type: "mouseup", button: 2, x: 10.0, y: 20.0, modifiers: 4, clickCount: 1, buttons: 0}),
+        json_frame({type: "mousemove", button: 0, x: 30.0, y: 40.0, modifiers: 4, buttons: 0}),
+      ])
+      fake.methods.count("Page.dispatchMouseEvent").should eq(4)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "releases the button when a single press is not acknowledged in time" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      withhold_press(fake)
+
+      expect_raises(Crystalfaux::TimeoutError, "mousedown") { page.mouse.down(timeout: 200.milliseconds) }
+      page.mouse.move(5, 5)
+
+      params_of(fake, "Page.dispatchMouseEvent", 3).map { |event| {event["type"].as_s, event["buttons"].as_i} }.should eq([
+        {"mousedown", 1}, {"mouseup", 0}, {"mousemove", 0},
+      ])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    # A mouse request is cancelled only by the page's own cancellation,
+    # which closing the page or a crash fires: the page is then gone while
+    # the transport still works.
+    it "keeps the page's failure and sends no release when the press is cancelled" do
+      {
+        "crash" => ->(_page : Crystalfaux::Page, fake : ScriptedBrowser) { fake.event("Page.crashed", {} of String => String) },
+        "close" => ->(page : Crystalfaux::Page, _fake : ScriptedBrowser) { page.close },
+      }.each do |name, cancel|
+        browser, fake = scripted_browser
+        page = browser.new_context.new_page
+        withhold_press(fake)
+
+        result = async do
+          page.mouse.click(1, 1, timeout: 5.seconds)
+          JSON::Any.new(nil)
+        end
+        fake.request("Page.dispatchMouseEvent")
+        fake.request("Page.dispatchMouseEvent")["params"]["type"].should eq(JSON::Any.new("mousedown"))
+        cancel.call(page, fake)
+
+        error = receive_within(result).should(be_a(Exception))
+        (error.is_a?(Crystalfaux::PageCrashed) || error.is_a?(Crystalfaux::PageClosed)).should be_true, "#{name}: #{error.inspect}"
+        page.wait_for_events_for_spec
+        fake.methods.count("Page.dispatchMouseEvent").should eq(2), name
+      ensure
+        browser.try &.close
+        fake.try &.close
+      end
+    end
+
+    it "raises the closed connection without hanging when the transport dies during the press" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      withhold_press(fake)
+
+      result = async do
+        page.mouse.click(1, 1, timeout: 5.seconds)
+        JSON::Any.new(nil)
+      end
+      fake.request("Page.dispatchMouseEvent")
+      fake.request("Page.dispatchMouseEvent")
+      fake.close
+
+      error = receive_within(result).should(be_a(Crystalfaux::ConnectionClosed))
+      error.message.to_s.should_not contain("mouseup")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
   end
 end

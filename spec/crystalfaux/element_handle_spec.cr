@@ -454,6 +454,36 @@ describe Crystalfaux::ElementHandle do
       fake.try &.close
     end
 
+    it "releases the button and names the press when the press reply is late" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) do |function, _|
+        function == DomScripts::HIT_TARGET ? reply(verdict("done")) : reply({result: {type: "string", value: "done"}})
+      end
+      fake.on("Page.getContentQuads") { reply({quads: [quad(100, 50, 40, 20)]}) }
+      fake.on("Page.dispatchMouseEvent") do |request|
+        request["params"]["type"] == "mousedown" ? [] of JSON::Any : reply({} of String => String)
+      end
+
+      error = expect_raises(Crystalfaux::TimeoutError) { handle.click(timeout: 300.milliseconds) }
+
+      message = error.message.to_s
+      message.should contain("mousedown")
+      message.should_not contain("no check finished")
+      events = Array.new(3) { fake.request("Page.dispatchMouseEvent")["params"] }
+      events.map { |event| {event["type"].as_s, event["x"].as_f, event["y"].as_f, event["buttons"].as_i} }.should eq([
+        {"mousemove", 120.0, 60.0, 0}, {"mousedown", 120.0, 60.0, 1}, {"mouseup", 120.0, 60.0, 0},
+      ])
+      sleep 300.milliseconds
+      methods = fake.methods
+      methods.count("Page.dispatchMouseEvent").should eq(3)
+      methods.count("Page.scrollIntoViewIfNeeded").should eq(1)
+      methods.count("Page.getContentQuads").should eq(1)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
     it "checks that each ancestor frame lets the click reach the element's frame" do
       browser, fake = scripted_browser
       page = loaded_page(browser)
