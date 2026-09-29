@@ -19,7 +19,40 @@ describe Crystalfaux::Launcher do
     end
   end
 
+  describe ".check_prefs" do
+    it "accepts bools, strings and integers from Int32::MIN to Int32::MAX" do
+      Crystalfaux::Launcher.check_prefs({
+        "a.bool"   => JSON::Any.new(false),
+        "a.string" => JSON::Any.new("fr-FR, fr"),
+        "a.min"    => JSON::Any.new(Int32::MIN.to_i64),
+        "a.max"    => JSON::Any.new(Int32::MAX.to_i64),
+      })
+    end
+
+    {
+      "a fraction"           => JSON::Any.new(1.9),
+      "an integral float"    => JSON::Any.new(1.0),
+      "one past Int32::MAX"  => JSON::Any.new(Int32::MAX.to_i64 + 1),
+      "one below Int32::MIN" => JSON::Any.new(Int32::MIN.to_i64 - 1),
+      "Int64::MAX"           => JSON::Any.new(Int64::MAX),
+      "null"                 => JSON::Any.new(nil),
+      "an array"             => JSON.parse("[1]"),
+      "an object"            => JSON.parse(%({"a": 1})),
+    }.each do |kind, value|
+      it "rejects #{kind} and names the pref" do
+        prefs = {"ok.pref" => JSON::Any.new(true), "bad.pref" => value}
+        expect_raises(Crystalfaux::PrefError, /"bad\.pref"/) { Crystalfaux::Launcher.check_prefs(prefs) }
+      end
+    end
+  end
+
   describe ".environment" do
+    it "rejects a pref that the browser cannot set" do
+      expect_raises(Crystalfaux::PrefError, /"media\.volume_scale"/) do
+        Crystalfaux::Launcher.environment(options(prefs: {"media.volume_scale" => JSON::Any.new(0.5)}))
+      end
+    end
+
     it "encodes config and prefs as JSON chunks, then adds the caller's env" do
       env = Crystalfaux::Launcher.environment(options(
         config: {"navigator.platform" => JSON::Any.new("MacIntel")},

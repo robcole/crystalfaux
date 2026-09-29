@@ -24,7 +24,9 @@ module Crystalfaux::Launcher
   #   `Browser.enable` `userPrefs` in the handshake, which works on the
   #   supported builds (`152.0.4-beta.30` and `beta.31`). They are also
   #   sent as `CAMOU_PREFS_n`, which only newer builds read at startup.
-  #   `BrowserProcess.launch` alone sends only the environment.
+  #   `BrowserProcess.launch` alone sends only the environment. A value must
+  #   be a bool, a string or an integer from `Int32::MIN` to `Int32::MAX`;
+  #   launching raises `PrefError` for any other value.
   # - *env*: extra environment variables. They override generated ones.
   #
   # Copies share the same `Array` and `Hash` objects. Use `#copy_with` with

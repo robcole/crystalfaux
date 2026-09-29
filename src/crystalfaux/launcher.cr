@@ -61,11 +61,38 @@ module Crystalfaux::Launcher
   # Crystalfaux::Launcher.environment(options, base: {} of String => String)
   # # => {"CAMOU_CONFIG_1" => "{}", "CAMOU_PREFS_1" => "{}"}
   # ```
+  #
+  # Raises `PrefError` when a pref value is not supported (`.check_prefs`).
   def self.environment(options : Options, base : Hash(String, String) = ENV.to_h) : Hash(String, String)
+    check_prefs(options.prefs)
     base.reject { |name, _| RESERVED_PREFIXES.any? { |prefix| name.starts_with?(prefix) } }
       .merge!(chunk("CAMOU_CONFIG", options.config.to_json))
       .merge!(chunk("CAMOU_PREFS", options.prefs.to_json))
       .merge!(options.env)
+  end
+
+  # Raises `PrefError`, naming the pref, unless every value of *prefs* is a
+  # bool, a string or an integer from `Int32::MIN` to `Int32::MAX`.
+  #
+  # Juggler sets every JSON number with `Services.prefs.setIntPref`
+  # (`additions/juggler/protocol/BrowserHandler.js`), which silently
+  # truncates fractions and wraps larger integers: `1.9` becomes `1` and
+  # `4294967297` becomes `1`. Firefox has no other pref types, so any other
+  # value is rejected here, before a process starts.
+  def self.check_prefs(prefs : Hash(String, JSON::Any)) : Nil
+    prefs.each do |name, value|
+      next if pref_value?(value)
+      raise PrefError.new("Pref #{name.inspect} has the unsupported value #{value.to_json}; " \
+                          "use a bool, a string or an integer from #{Int32::MIN} to #{Int32::MAX}")
+    end
+  end
+
+  private def self.pref_value?(value : JSON::Any) : Bool
+    case raw = value.raw
+    when Bool, String then true
+    when Int64        then Int32::MIN <= raw <= Int32::MAX
+    else                   false
+    end
   end
 
   # Splits *payload* into `<prefix>_1..N` variables of at most `CHUNK_SIZE`

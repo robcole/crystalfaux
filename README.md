@@ -141,8 +141,10 @@ browser = Crystalfaux::Browser.launch(proxy: proxy)
 context = browser.new_context(proxy: Crystalfaux::Proxy.new("other.example", 8080))
 ```
 
-Firefox preferences go in `prefs:`. Values can be booleans, integers or
-strings:
+Firefox preferences go in `prefs:`. A value must be a boolean, a string or
+an integer from -2,147,483,648 to 2,147,483,647, as Firefox stores it.
+Other values, for example `1.5`, `null` or an array, raise `PrefError`
+before the browser starts:
 
 ```crystal
 prefs = {

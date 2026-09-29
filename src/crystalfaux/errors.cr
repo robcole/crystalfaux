@@ -94,4 +94,9 @@ module Crystalfaux
   # wrong type, or a user agent that does not match its OS.
   class ConfigError < Error
   end
+
+  # Raised when a Firefox pref value is not a bool, a string or an integer
+  # in the signed 32-bit range (see `Launcher.check_prefs`).
+  class PrefError < Error
+  end
 end

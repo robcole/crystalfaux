@@ -79,12 +79,14 @@ module Crystalfaux
     # request of the browser goes through it, unless a context has its own
     # (`#new_context`).
     #
-    # Raises `LaunchError` when no executable is found or the browser does
-    # not start, `UnsupportedBrowserError` when its version is not
+    # Raises `PrefError` when a pref value is not supported, before it looks
+    # for the executable. Raises `LaunchError` when no executable is found or
+    # the browser does not start, `UnsupportedBrowserError` when its version is not
     # supported, and what the handshake raises. On failure, the process is
     # stopped and its temporary profile removed.
     def self.launch(options : Launcher::Options = Launcher::Options.new,
                     timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil) : self
+      Launcher.check_prefs(options.prefs)
       executable = Launcher::Discovery.executable(options.executable)
       unless executable
         raise LaunchError.new("Camoufox executable not found; set CRYSTALFAUX_CAMOUFOX or install Camoufox")
@@ -129,8 +131,9 @@ module Crystalfaux
     # (`additions/juggler/protocol/BrowserHandler.js`), so pages opened
     # after the handshake see them. This is how prefs reach the supported
     # builds, whose `camoufox.cfg` does not read `CAMOU_PREFS_n`.
-    # A pref value must be a bool, an integer or a string; for any other
-    # value the browser rejects `Browser.enable` and this raises.
+    # Raises `PrefError` before the handshake unless each pref value is a
+    # bool, a string or an integer in the signed 32-bit range
+    # (`Launcher.check_prefs`).
     #
     # The browser owns *connection* and *process* from then on. When the
     # handshake raises, it removes its handlers from *connection*, and the
@@ -138,6 +141,7 @@ module Crystalfaux
     def self.connect(connection : Juggler::Connection, process : Launcher::BrowserProcess? = nil,
                      timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil,
                      prefs : Hash(String, JSON::Any) = {} of String => JSON::Any) : self
+      Launcher.check_prefs(prefs)
       browser = new(connection, process)
       begin
         browser.handshake(timeout, proxy, prefs)

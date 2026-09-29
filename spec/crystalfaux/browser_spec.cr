@@ -224,3 +224,52 @@ describe Crystalfaux::Browser do
     end
   end
 end
+
+private FAKE_BROWSER = File.expand_path("../fixtures/fake_camoufox.sh", __DIR__)
+
+# Makes a supported install directory around the fake browser and yields
+# launch options for it, with the fake's pid written to *pid_file*.
+private def with_fake_install(mode : String, pid_file : String, &) : Nil
+  install = Path[File.tempname("crystalfaux-install")]
+  Dir.mkdir(install)
+  File.write(install / "version.json", {version: "152.0.4", build: "beta.31"}.to_json)
+  File.copy(FAKE_BROWSER, install / "camoufox")
+  yield Crystalfaux::Launcher::Options.new(executable: (install / "camoufox").to_s,
+    env: {"FAKE_MODE" => mode, "FAKE_PID" => pid_file})
+ensure
+  FileUtils.rm_rf(install) if install
+end
+
+# The profile directories this spec process created in the temp dir.
+private def launcher_profiles : Array(String)
+  Dir.glob(File.join(Dir.tempdir, "*-#{Process.pid}-*crystalfaux-profile*"))
+end
+
+describe "Crystalfaux::Browser.launch with a fake browser" do
+  it "rejects an unsupported pref before it starts a process" do
+    pid_file = File.tempname("crystalfaux-pid")
+    with_fake_install("echo", pid_file) do |options|
+      options = options.copy_with(prefs: {"media.volume_scale" => JSON::Any.new(0.5)})
+      expect_raises(Crystalfaux::PrefError, /"media\.volume_scale"/) { Crystalfaux::Browser.launch(options) }
+      expect_raises(Crystalfaux::PrefError) { Crystalfaux::Launcher::BrowserProcess.launch(options) }
+    end
+
+    File.exists?(pid_file).should be_false
+    launcher_profiles.should be_empty
+  end
+
+  it "stops the process and removes its profile when Browser.enable fails" do
+    pid_file = File.tempname("crystalfaux-pid")
+    with_fake_install("reject-enable", pid_file) do |options|
+      expect_raises(Crystalfaux::ProtocolError, /rejected prefs/) do
+        Crystalfaux::Browser.launch(options, 5.seconds)
+      end
+    end
+
+    pid = File.read(pid_file).to_i64
+    Process.exists?(pid).should be_false
+    launcher_profiles.should be_empty
+  ensure
+    File.delete?(pid_file) if pid_file
+  end
+end

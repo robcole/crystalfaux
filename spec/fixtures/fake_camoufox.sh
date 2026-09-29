@@ -11,6 +11,11 @@
 # - crash: log a message and exit with status 3 before the ready line.
 # - stubborn: print the ready line, then ignore pipe close and SIGTERM.
 # - env: print its CAMOU_* variables, sorted, then behave as echo.
+# - reject-enable: print the ready line, wait for the first request (id 1,
+#   `Browser.enable`), answer it with an error, then drop every frame.
+#
+# When FAKE_PID names a file, every mode first writes its pid there.
+[ -n "$FAKE_PID" ] && echo $$ >"$FAKE_PID"
 echo "args: $*"
 case "${FAKE_MODE:-echo}" in
   silent)
@@ -33,6 +38,12 @@ case "${FAKE_MODE:-echo}" in
     env | grep '^CAMOU_' | sort
     echo "Juggler listening to the pipe"
     exec cat <&3 >&4
+    ;;
+  reject-enable)
+    echo "Juggler listening to the pipe"
+    head -c 1 <&3 >/dev/null
+    printf '{"id":1,"error":{"message":"rejected prefs"}}\0' >&4
+    exec cat <&3 >/dev/null
     ;;
   *)
     echo "Juggler listening to the pipe"
