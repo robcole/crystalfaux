@@ -1,8 +1,17 @@
+# Portions of this file are translated to Crystal from Camoufox
+# (https://github.com/daijro/camoufox, commit eb5dc3bc):
+# - `pythonlib/camoufox/utils.py`
+#
+# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
+# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
+# `data/camoufox/README.md`.
+
 module Crystalfaux::Fingerprint
   # The config keys that Camoufox reads, and the type of each value, from
   # the vendored `data/camoufox/properties.json` (Camoufox
   # `settings/properties.json`).
   module Properties
+    # The value type of a config key, as `properties.json` names it.
     enum Type
       Str
       Int

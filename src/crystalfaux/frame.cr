@@ -53,7 +53,19 @@ module Crystalfaux
     #   config key `allowMainWorld` set to `true`; without it, the call
     #   raises `EvaluationError`.
     #
-    # When the script returns a promise, the call waits for it. Both worlds
+    # When the script returns a promise, the call waits for it, with one
+    # exception: in the isolated world, a promise that a page API makes,
+    # such as the one `fetch()` returns, never settles, and the call raises
+    # `TimeoutError`. Wrap it in a promise that the script makes, or use
+    # `World::Main`:
+    #
+    # ```
+    # frame.evaluate("fetch('/api').then(r => r.text())") # raises TimeoutError
+    # frame.evaluate("new Promise((resolve, reject) => fetch('/api').then(r => r.text()).then(resolve, reject))")
+    # frame.evaluate("fetch('/api').then(r => r.text())", world: :main) # with allowMainWorld
+    # ```
+    #
+    # Both worlds
     # return `undefined` and `null` as `nil`, and a top-level `NaN`,
     # `Infinity`, `-Infinity` or `-0` as a float. Inside objects and arrays
     # the worlds differ:

@@ -30,6 +30,7 @@ module Crystalfaux
   # and also stops when that connection closes; `#close` does not wait for
   # it.
   class Browser
+    # How long a browser, context or page call waits by default.
     DEFAULT_TIMEOUT = 30.seconds
 
     # What `#register` returns for a page whose creation gave up.
@@ -107,8 +108,13 @@ module Crystalfaux
     # ```
     # config = Crystalfaux::Fingerprint::Config.for(os: :mac, screen: Crystalfaux::Fingerprint::Screen.new(1512, 982),
     #   user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0")
-    # browser = Crystalfaux::Browser.launch(config: config, prefs: {"media.autoplay.default" => JSON::Any.new(0_i64)})
+    # browser = Crystalfaux::Browser.launch(config: config)
     # ```
+    #
+    # NOTE: *prefs* have no effect on the supported builds
+    # (`152.0.4-beta.30` and `beta.31`). Their `camoufox.cfg` does not read
+    # `CAMOU_PREFS_n`; only newer Camoufox builds do. A fix that sends prefs
+    # through `Browser.enable` `userPrefs` is scheduled.
     def self.launch(*, config : Fingerprint::Config, prefs : Hash(String, JSON::Any) = {} of String => JSON::Any,
                     proxy : Proxy? = nil, options : Launcher::Options = Launcher::Options.new,
                     timeout : Time::Span = DEFAULT_TIMEOUT) : self
@@ -191,6 +197,7 @@ module Crystalfaux
       @connection.close
     end
 
+    # Whether `#close` ran or the pipe to the browser closed.
     def closed? : Bool
       @lock.synchronize { @closed }
     end

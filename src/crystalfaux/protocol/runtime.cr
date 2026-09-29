@@ -3,8 +3,10 @@ module Crystalfaux::Protocol
   # The structs sit in one file because each is a small value type of the
   # same schema section.
   module Runtime
+    # The `ObjectType` enum of the Juggler schema.
     Protocol.wire_enum(ObjectType, object: "object", function: "function", undefined: "undefined",
       string: "string", number: "number", boolean: "boolean", symbol: "symbol", bigint: "bigint")
+    # The `ObjectSubtype` enum of the Juggler schema.
     Protocol.wire_enum(ObjectSubtype, array: "array", null: "null", node: "node", regexp: "regexp",
       date: "date", map: "map", set: "set", weakmap: "weakmap", weakset: "weakset", error: "error",
       proxy: "proxy", promise: "promise", typedarray: "typedarray")
@@ -25,6 +27,7 @@ module Crystalfaux::Protocol
       Protocol.any_fields value
     end
 
+    # The `ExceptionDetails` type of the Juggler schema.
     struct ExceptionDetails
       include Message
 
@@ -101,6 +104,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Runtime.executionContextCreated` event.
     struct ExecutionContextCreated
       include Message
       METHOD = "Runtime.executionContextCreated"
@@ -109,6 +113,7 @@ module Crystalfaux::Protocol
       field aux_data : AuxData
     end
 
+    # The `Runtime.executionContextDestroyed` event.
     struct ExecutionContextDestroyed
       include Message
       METHOD = "Runtime.executionContextDestroyed"
@@ -116,6 +121,7 @@ module Crystalfaux::Protocol
       field execution_context_id : String
     end
 
+    # The `Runtime.executionContextsCleared` event.
     struct ExecutionContextsCleared
       include Message
       METHOD = "Runtime.executionContextsCleared"

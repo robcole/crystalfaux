@@ -45,7 +45,10 @@ module Crystalfaux::Launcher
   # config and prefs as JSON chunks, then `options.env`.
   #
   # The prefs must travel here, not in `Browser.enable`: `camoufox.cfg`
-  # applies them at startup, before Firefox caches some of them.
+  # applies them at startup, before Firefox caches some of them. Only
+  # Camoufox builds newer than the supported range read `CAMOU_PREFS_n`;
+  # the supported `152.0.4-beta.30` and `beta.31` builds ignore it, so the
+  # prefs have no effect there (see `Options`).
   #
   # Migration: earlier versions of this method returned only the variables to
   # add (the chunks and `options.env`), and the child inherited the rest.

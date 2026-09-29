@@ -22,11 +22,13 @@ module Crystalfaux
     # The Juggler request id.
     getter id : String
 
+    # The URL of the request.
     getter url : String
 
     # The HTTP method, for example `"GET"`.
     getter method : String
 
+    # The request headers.
     getter headers : HTTP::Headers
 
     # The request body, decoded; `nil` when the request has none. Juggler
@@ -34,6 +36,7 @@ module Crystalfaux
     # `additions/juggler/NetworkObserver.js`).
     getter post_data : Bytes?
 
+    # What the request loads, for example `ResourceType::Image`.
     getter resource_type : ResourceType
 
     # The frame that sent the request; `nil` for a redirect.

@@ -3,10 +3,14 @@ module Crystalfaux::Protocol
   # page targets and cookies. The structs sit in one file because each is a
   # small value type of the same schema section.
   module Browser
+    # The `TargetType` enum of the Juggler schema.
     Protocol.wire_enum(TargetType, page: "page")
+    # The `SameSite` enum of the Juggler schema.
     Protocol.wire_enum(SameSite, strict: "Strict", lax: "Lax", none: "None")
+    # The protocol of a proxy server: `http`, `https`, `socks` or `socks4`.
     Protocol.wire_enum(ProxyType, http: "http", https: "https", socks: "socks", socks4: "socks4")
 
+    # The `TargetInfo` type of the Juggler schema.
     struct TargetInfo
       include Message
 
@@ -17,6 +21,7 @@ module Crystalfaux::Protocol
       field opener_id : String?
     end
 
+    # The `UserPreference` type of the Juggler schema.
     struct UserPreference
       include Message
 
@@ -48,6 +53,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # A cookie of a browser context, as `Browser.getCookies` returns it.
     struct Cookie
       include Message
 
@@ -64,6 +70,7 @@ module Crystalfaux::Protocol
       field same_site : SameSite
     end
 
+    # The `Browser.enable` request.
     struct Enable
       include Message
       include Request(Empty)
@@ -76,9 +83,11 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.getInfo` request.
     struct GetInfo
       include Message
 
+      # The result of `Browser.getInfo`.
       struct Result
         include Message
 
@@ -94,9 +103,11 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.createBrowserContext` request.
     struct CreateBrowserContext
       include Message
 
+      # The result of `Browser.createBrowserContext`.
       struct Result
         include Message
 
@@ -112,6 +123,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.removeBrowserContext` request.
     struct RemoveBrowserContext
       include Message
       include Request(Empty)
@@ -128,6 +140,7 @@ module Crystalfaux::Protocol
     struct NewPage
       include Message
 
+      # The result of `Browser.newPage`.
       struct Result
         include Message
 
@@ -155,6 +168,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.setExtraHTTPHeaders` request.
     struct SetExtraHTTPHeaders
       include Message
       include Request(Empty)
@@ -167,6 +181,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.setBrowserProxy` request.
     struct SetBrowserProxy
       include Message
       include Request(Empty)
@@ -184,6 +199,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.setContextProxy` request.
     struct SetContextProxy
       include Message
       include Request(Empty)
@@ -202,6 +218,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.setRequestInterception` request.
     struct SetRequestInterception
       include Message
       include Request(Empty)
@@ -214,6 +231,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.setCookies` request.
     struct SetCookies
       include Message
       include Request(Empty)
@@ -226,6 +244,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.clearCookies` request.
     struct ClearCookies
       include Message
       include Request(Empty)
@@ -237,9 +256,11 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Browser.getCookies` request.
     struct GetCookies
       include Message
 
+      # The result of `Browser.getCookies`.
       struct Result
         include Message
 
@@ -264,6 +285,7 @@ module Crystalfaux::Protocol
       field target_info : TargetInfo
     end
 
+    # The `Browser.detachedFromTarget` event.
     struct DetachedFromTarget
       include Message
       METHOD = "Browser.detachedFromTarget"

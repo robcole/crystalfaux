@@ -1,3 +1,11 @@
+# Portions of this file are translated to Crystal from Camoufox
+# (https://github.com/daijro/camoufox, commit eb5dc3bc):
+# - `pythonlib/camoufox/fingerprints.py`
+#
+# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
+# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
+# `data/camoufox/README.md`.
+
 module Crystalfaux::Fingerprint
   # Makes the screen and window keys of a config describe a possible
   # desktop. A page can read all of them, so an impossible combination, such

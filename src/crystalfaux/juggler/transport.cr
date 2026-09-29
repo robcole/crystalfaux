@@ -1,3 +1,6 @@
+# The Juggler wire layer: framing (`Transport`), requests, replies and
+# events (`Connection`). `Browser` builds on it; most programs do not use
+# it directly.
 module Crystalfaux::Juggler
   # Frames Juggler messages over a duplex `IO`.
   #
@@ -63,6 +66,7 @@ module Crystalfaux::Juggler
       # The other end already closed the pipe; nothing is left to release.
     end
 
+    # Whether `#close` ran.
     def closed? : Bool
       @closed.get
     end

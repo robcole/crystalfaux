@@ -1,3 +1,11 @@
+# Portions of this file are translated to Crystal from Camoufox
+# (https://github.com/daijro/camoufox, commit eb5dc3bc):
+# - `pythonlib/camoufox/fingerprints.py`
+#
+# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
+# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
+# `data/camoufox/README.md`.
+
 module Crystalfaux::Fingerprint
   # Fonts of each OS, keyed `mac`, `win` and `lin`, from the vendored
   # `data/camoufox/fonts.json` (Camoufox `pythonlib/camoufox/fonts.json`).

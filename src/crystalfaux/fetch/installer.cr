@@ -19,6 +19,7 @@ module Crystalfaux::Fetch
   # deletes the archive and the staging directory on success and on failure,
   # so an interrupted install leaves no directory that looks installed.
   class Installer
+    # The directory that holds one subdirectory per install.
     getter dir : Path
 
     # *progress* receives a progress line while the archive downloads; `nil`

@@ -1,3 +1,11 @@
+# Portions of this file are translated to Crystal from Playwright
+# (https://github.com/microsoft/playwright):
+# - `packages/isomorphic/utilityScriptSerializers.ts`
+#
+# Copyright (c) Microsoft Corporation.
+# Licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0). See `NOTICE`.
+
 module Crystalfaux::Protocol::Runtime
   # :nodoc:
   #
@@ -19,7 +27,7 @@ module Crystalfaux::Protocol::Runtime
   # text "Main world evaluation is disabled".
   #
   # The value comes back in Playwright's serialized form
-  # (`server/isomorphic/utilityScriptSerializers.ts`), which `.decode` turns
+  # (`packages/isomorphic/utilityScriptSerializers.ts`), which `.decode` turns
   # into JSON.
   module MainWorld
     PREFIX = "mw:"

@@ -1,3 +1,11 @@
+# Portions of this file are translated to Crystal from Camoufox
+# (https://github.com/daijro/camoufox, commit eb5dc3bc):
+# - `pythonlib/camoufox/pkgman.py`
+#
+# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
+# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
+# `data/camoufox/README.md`.
+
 module Crystalfaux::Fetch
   # An operating system and architecture, named as in Camoufox release
   # assets: `os` is `"mac"` or `"lin"`, `arch` is `"x86_64"`, `"arm64"` or

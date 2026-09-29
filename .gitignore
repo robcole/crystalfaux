@@ -5,3 +5,5 @@ plans
 /bin/ameba
 /.crystal-cache/
 /bin/crystalfaux
+# `crystal docs` output.
+/docs/

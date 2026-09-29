@@ -1,3 +1,12 @@
+# Portions of this file are translated to Crystal from Camoufox
+# (https://github.com/daijro/camoufox, commit eb5dc3bc):
+# - `pythonlib/camoufox/pkgman.py`
+# - `pythonlib/camoufox/multiversion.py`
+#
+# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
+# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
+# `data/camoufox/README.md`.
+
 require "json"
 require "semantic_version"
 
@@ -9,8 +18,11 @@ module Crystalfaux::Fetch
     getter version : String
     # The Camoufox build, for example `"beta.31"`.
     getter build : String
+    # The version and build as one `SemanticVersion`, for comparing builds.
     getter semantic_version : SemanticVersion
+    # The release asset that holds the build.
     getter asset : Asset
+    # Whether the build is a prerelease or an alpha build.
     getter? prerelease : Bool
 
     def initialize(@version : String, @build : String, @semantic_version : SemanticVersion,

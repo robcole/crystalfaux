@@ -1,0 +1,38 @@
+crystalfaux
+Copyright (c) 2026 Rob Cole. Licensed under the MIT License (see LICENSE).
+
+This software includes third-party material under other licences. Each
+file named below carries its own notice.
+
+Camoufox (https://github.com/daijro/camoufox), commit
+eb5dc3bc5b917d1e6c71d9cacfecdddb55fbfc4a. Copyright the Camoufox authors.
+
+- protocol/Protocol.js: copied without changes. Mozilla Public License 2.0
+  (https://mozilla.org/MPL/2.0/); the file keeps its MPL header.
+- data/camoufox/properties.json: copied without changes from
+  settings/properties.json. The repository root LICENSE is MPL-2.0.
+- data/camoufox/fonts.json: copied without changes from
+  pythonlib/camoufox/fonts.json.
+- src/crystalfaux/fingerprint/*.cr and src/crystalfaux/fetch/{platform,build}.cr:
+  logic translated from pythonlib/camoufox/*.py.
+
+  pythonlib/pyproject.toml declares the camoufox Python package MIT, in a
+  repository whose root LICENSE is MPL-2.0. data/camoufox/README.md records
+  which metadata applies to each file.
+
+Playwright (https://github.com/microsoft/playwright). Apache License 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+- src/crystalfaux/page.cr, src/crystalfaux/page/keyboard.cr,
+  src/crystalfaux/page/keyboard_layout.cr, src/crystalfaux/page/mouse.cr,
+  src/crystalfaux/resource_type.cr, src/crystalfaux/protocol/main_world.cr:
+  portions translated to Crystal from the Playwright files that each one
+  names.
+
+Playwright's NOTICE file:
+
+  Playwright
+  Copyright (c) Microsoft Corporation
+
+  This software contains code derived from the Puppeteer project (https://github.com/puppeteer/puppeteer),
+  available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/blob/master/LICENSE).

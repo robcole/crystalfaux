@@ -1,5 +1,6 @@
 # Launches and drives Camoufox over Playwright's Juggler protocol.
 module Crystalfaux
+  # The version of the shard.
   VERSION = "0.1.0"
 end
 

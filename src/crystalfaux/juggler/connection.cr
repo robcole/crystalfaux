@@ -181,6 +181,7 @@ module Crystalfaux::Juggler
       handlers.each { |handler| run_close_handler(handler) }
     end
 
+    # Whether `#close` ran or the transport reached EOF or failed.
     def closed? : Bool
       @lock.synchronize { @closed }
     end

@@ -87,6 +87,7 @@ module Crystalfaux
       end
     end
 
+    # Whether `#close` ran, or the browser closed the context.
     def closed? : Bool
       @lock.synchronize { @closed }
     end
@@ -138,10 +139,16 @@ module Crystalfaux
       Protocol.call(@browser.connection, Protocol::Browser::GetCookies.new(@id), timeout: timeout).cookies
     end
 
+    # Adds or replaces *cookies* in the context.
+    #
+    # ```
+    # context.set_cookies([Crystalfaux::CookieOptions.new("session", "abc", url: "https://example.com/")])
+    # ```
     def set_cookies(cookies : Enumerable(CookieOptions), timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
       Protocol.call(@browser.connection, Protocol::Browser::SetCookies.new(cookies.to_a, @id), timeout: timeout)
     end
 
+    # Removes every cookie of the context.
     def clear_cookies(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
       Protocol.call(@browser.connection, Protocol::Browser::ClearCookies.new(@id), timeout: timeout)
     end

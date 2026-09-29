@@ -3,6 +3,7 @@ module Crystalfaux::Protocol
   # lifecycle events. The structs sit in one file because each is a small
   # value type of the same schema section.
   module Network
+    # The `HTTPHeader` type of the Juggler schema.
     struct HTTPHeader
       include Message
 
@@ -23,6 +24,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `SecurityDetails` type of the Juggler schema.
     struct SecurityDetails
       include Message
 
@@ -50,6 +52,7 @@ module Crystalfaux::Protocol
       field response_start : Float64
     end
 
+    # The `Network.setRequestInterception` request.
     struct SetRequestInterception
       include Message
       include Request(Empty)
@@ -61,6 +64,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Network.setExtraHTTPHeaders` request.
     struct SetExtraHTTPHeaders
       include Message
       include Request(Empty)
@@ -121,9 +125,11 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Network.getResponseBody` request.
     struct GetResponseBody
       include Message
 
+      # The result of `Network.getResponseBody`.
       struct Result
         include Message
 
@@ -141,6 +147,7 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `Network.requestWillBeSent` event.
     struct RequestWillBeSent
       include Message
       METHOD = "Network.requestWillBeSent"
@@ -161,6 +168,7 @@ module Crystalfaux::Protocol
       field internal_cause : String
     end
 
+    # The `Network.responseReceived` event.
     struct ResponseReceived
       include Message
       METHOD = "Network.responseReceived"
@@ -177,6 +185,7 @@ module Crystalfaux::Protocol
       field from_service_worker : Bool
     end
 
+    # The `Network.requestFinished` event.
     struct RequestFinished
       include Message
       METHOD = "Network.requestFinished"
@@ -188,6 +197,7 @@ module Crystalfaux::Protocol
       field protocol_version : String?
     end
 
+    # The `Network.requestFailed` event.
     struct RequestFailed
       include Message
       METHOD = "Network.requestFailed"

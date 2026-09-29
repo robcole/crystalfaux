@@ -150,4 +150,23 @@ describe "Evaluation worlds", tags: "browser" do
     browser.try &.close
     server.try &.close
   end
+
+  # Pins Camoufox behaviour that `Frame#evaluate` documents: the isolated
+  # world does not settle a promise that a page API made, but does settle
+  # one that the script made around it. A Camoufox change makes this fail.
+  it "settles a page-API promise in the isolated world only when the script wraps it" do
+    binary = camoufox_binary
+    server = WorldsServer.new
+    browser = launch(binary, {"allowMainWorld" => JSON::Any.new(true)})
+    page, _ = open_worlds_page(browser, server)
+    fetch_child = "fetch('/child').then(r => r.status)"
+
+    expect_raises(Crystalfaux::TimeoutError) { page.evaluate(fetch_child, timeout: 1.second) }
+    page.evaluate("new Promise((resolve, reject) => #{fetch_child}.then(resolve, reject))")
+      .should eq(JSON::Any.new(200_i64))
+    page.evaluate(fetch_child, world: :main).should eq(JSON::Any.new(200_i64))
+  ensure
+    browser.try &.close
+    server.try &.close
+  end
 end

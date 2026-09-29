@@ -1,3 +1,12 @@
+# Portions of this file are translated to Crystal from Playwright
+# (https://github.com/microsoft/playwright):
+# - `packages/playwright-core/src/server/frames.ts` (`Frame.content`)
+# - `packages/playwright-core/src/server/screenshotter.ts`
+#
+# Copyright 2017 Google Inc. Modifications copyright (c) Microsoft Corporation.
+# Licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0). See `NOTICE`.
+
 require "base64"
 
 module Crystalfaux
@@ -304,10 +313,14 @@ module Crystalfaux
       end
     end
 
+    # Whether the page is closed: by `#close`, by its context or browser,
+    # or because the connection closed. A crashed page is not closed until
+    # one of these happens.
     def closed? : Bool
       @lock.synchronize { @closed }
     end
 
+    # Whether the browser reported that the page crashed (`Page.crashed`).
     def crashed? : Bool
       @lock.synchronize { @crashed }
     end

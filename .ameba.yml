@@ -2,6 +2,7 @@
 Globs:
   - "src/**/*.cr"
   - "spec/**/*.cr"
+  - "examples/**/*.cr"
 
 Excluded:
   - "lib/**"

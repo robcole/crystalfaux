@@ -1,3 +1,12 @@
+# Portions of this file are translated to Crystal from Playwright
+# (https://github.com/microsoft/playwright):
+# - `packages/playwright-core/src/server/input.ts`
+# - `packages/playwright-core/src/server/firefox/ffInput.ts`
+#
+# Copyright 2017 Google Inc. Modifications copyright (c) Microsoft Corporation.
+# Licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0). See `NOTICE`.
+
 module Crystalfaux
   class Page
     # The mouse of a `Page`. Coordinates are CSS pixels from the top-left
@@ -18,6 +27,7 @@ module Crystalfaux
     # when the page goes away. Use one mouse from one fiber at a time: its
     # position and buttons are shared state.
     class Mouse
+      # A mouse button.
       enum Button
         Left
         Middle

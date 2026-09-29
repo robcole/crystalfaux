@@ -1,3 +1,12 @@
+# Portions of this file are translated to Crystal from Camoufox
+# (https://github.com/daijro/camoufox, commit eb5dc3bc):
+# - `pythonlib/camoufox/fingerprints.py`
+# - `pythonlib/camoufox/utils.py`
+#
+# Copyright the Camoufox authors. `pythonlib/pyproject.toml` declares the
+# Python package MIT; the repository root `LICENSE` is MPL-2.0. See
+# `data/camoufox/README.md`.
+
 module Crystalfaux::Fingerprint
   # A validated Camoufox fingerprint config: the object that the browser
   # reads from `CAMOU_CONFIG_1..N` at startup.

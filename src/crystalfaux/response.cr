@@ -14,16 +14,22 @@ module Crystalfaux
   # that the request finished or failed, or that the page closed or
   # crashed; see `Page::Traffic`.
   class Response
+    # The request that this response answers.
     getter request : Request
 
+    # The HTTP status code, for example `200`.
     getter status : Int32
 
+    # The HTTP status text, for example `"OK"`.
     getter status_text : String
 
+    # The response headers.
     getter headers : HTTP::Headers
 
+    # The IP address of the server, when the browser knows it.
     getter remote_ip_address : String?
 
+    # The port of the server, when the browser knows it.
     getter remote_port : Int32?
 
     @from_cache : Bool
@@ -42,10 +48,12 @@ module Crystalfaux
       @from_cache = event.from_cache
     end
 
+    # The URL of the request.
     def url : String
       @request.url
     end
 
+    # Whether the browser took the response from its cache.
     def from_cache? : Bool
       @from_cache
     end

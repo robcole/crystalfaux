@@ -50,7 +50,10 @@ module Crystalfaux
   # as `Browser.launch` does with its *timeout*. Browser shutdown is bounded
   # by `Launcher::BrowserProcess#close`, which kills a process that does not
   # stop in its grace period. The launch block must not call `#close` of its
-  # own pool: that call raises `PoolError`.
+  # own pool: that call raises `PoolError`. The guard covers only the fiber
+  # that runs the launch block. A launch block that waits for a `#close`
+  # in another fiber is not detected: `#close` waits for the launch, and
+  # the launch waits for `#close`, until the launch block's own deadline.
   #
   # A block whose browser or page dies while it runs gets the error of its
   # next call: `PageCrashed`, `ConnectionClosed` or `PageClosed`. The pool
@@ -138,6 +141,7 @@ module Crystalfaux
       @busy.wait
     end
 
+    # Whether `#close` started.
     def closed? : Bool
       @lock.synchronize { @closed }
     end

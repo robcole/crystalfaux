@@ -1,3 +1,11 @@
+# Portions of this file are translated to Crystal from Playwright
+# (https://github.com/microsoft/playwright):
+# - `packages/playwright-core/src/server/firefox/ffNetworkManager.ts`
+#
+# Copyright 2019 Google Inc. Modifications copyright (c) Microsoft Corporation.
+# Licensed under the Apache License, Version 2.0
+# (https://www.apache.org/licenses/LICENSE-2.0). See `NOTICE`.
+
 module Crystalfaux
   # What a request loads, as Playwright names it.
   #
