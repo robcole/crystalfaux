@@ -258,13 +258,14 @@ describe Crystalfaux::Page::Mouse do
         end
         [json_frame({id: 0})]
       end
-      seen = [] of {Time::Instant, Array(String)}
-      guard = -> { seen << {Time.instant, fake.methods} }
+      seen = [] of {Time::Instant, Array(String), Fiber}
+      guard = -> { seen << {Time.instant, fake.methods, Fiber.current} }
 
       page.mouse.click(10, 20, guard: guard)
 
       seen.size.should eq(1)
-      guarded_at, methods = seen.first
+      guarded_at, methods, fiber = seen.first
+      fiber.should be(Fiber.current)
       guarded_at.should be >= receive_within(move_acknowledged)
       methods.count("Page.dispatchMouseEvent").should eq(1)
       params_of(fake, "Page.dispatchMouseEvent", 3).map(&.["type"].as_s).should eq(%w[mousemove mousedown mouseup])

@@ -278,13 +278,26 @@ describe Crystalfaux::Frame do
       fake.try &.close
     end
 
-    it "ends the wait with TimeoutError when the guard runs past the deadline" do
+    it "ends the wait with TimeoutError and polls no more when the guard runs past the deadline" do
       browser, fake = scripted_browser
       page = loaded_page(browser)
+      fake.on("Runtime.evaluate") { reply({result: {type: "boolean", value: false}}) }
       fake.on("Runtime.callFunction") { reply({result: {type: "boolean", value: false}}) }
+      slow_guard = -> { sleep 30.milliseconds }
+      waits = {
+        "wait_for_function" => {"Runtime.evaluate", /window\.ready/, -> {
+          page.wait_for_function("window.ready", timeout: 10.milliseconds, guard: slow_guard); nil
+        }},
+        "wait_for_selector" => {"Runtime.callFunction", /\.dialog/, -> {
+          page.wait_for_selector(".dialog", timeout: 10.milliseconds, guard: slow_guard); nil
+        }},
+      }
 
-      expect_raises(Crystalfaux::TimeoutError, /\.dialog/) do
-        page.wait_for_selector(".dialog", timeout: 100.milliseconds, guard: -> { sleep 150.milliseconds })
+      waits.each do |name, (method, description, wait)|
+        before = fake.methods.count(method)
+        expect_raises(Crystalfaux::TimeoutError, description) { wait.call }
+        page.wait_for_events_for_spec
+        fake.methods.count(method).should eq(before), name
       end
     ensure
       browser.try &.close
