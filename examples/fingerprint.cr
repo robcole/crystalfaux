@@ -2,21 +2,23 @@
 # from a page. The config also turns on the page's own JavaScript world
 # for `world: :main`.
 #
+# With no argument, it loads the committed macOS desktop fingerprint from
+# `examples/fingerprints/`. Give the path of another config JSON to use it;
+# the prefs come from `<name>.prefs.json` beside it, when that file exists.
+#
 #   CRYSTALFAUX_CAMOUFOX=/path/to/camoufox crystal run examples/fingerprint.cr
+#   CRYSTALFAUX_CAMOUFOX=/path/to/camoufox crystal run examples/fingerprint.cr -- my-config.json
 require "../src/crystalfaux"
 
-user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0"
+config_path = Path[ARGV[0]? || Path[__DIR__, "fingerprints", "macos-desktop.json"]]
+prefs_path = config_path.parent / "#{config_path.stem}.prefs.json"
 
-# `Config.for` sets the keys that must agree: user agent, platform, screen,
-# window and fonts. `merge` adds other keys; every key is checked against
-# Camoufox's property list.
+# `Config.from_json` checks every key and value type against Camoufox's
+# property list. `merge` adds other keys.
 config = Crystalfaux::Fingerprint::Config
-  .for(os: :windows, screen: Crystalfaux::Fingerprint::Screen.new(1920, 1080), user_agent: user_agent)
-  .merge({
-    "navigator.hardwareConcurrency" => JSON::Any.new(8_i64),
-    "navigator.language"            => JSON::Any.new("en-GB"),
-    "allowMainWorld"                => JSON::Any.new(true),
-  })
+  .from_json(File.read(config_path))
+  .merge({"allowMainWorld" => JSON::Any.new(true)})
+prefs = File.exists?(prefs_path) ? JSON.parse(File.read(prefs_path)).as_h : {} of String => JSON::Any
 
 # An unknown key raises `ConfigError` instead of being ignored.
 begin
@@ -25,15 +27,16 @@ rescue ex : Crystalfaux::ConfigError
   puts "Rejected: #{ex.message}"
 end
 
-browser = Crystalfaux::Browser.launch(config: config)
+browser = Crystalfaux::Browser.launch(config: config, prefs: prefs)
 begin
   page = browser.new_context.new_page
   page.goto("data:text/html,<script>window.appState = {user: 'Ada'}</script>")
 
+  puts "config: #{config_path}"
   puts "userAgent: #{page.evaluate("navigator.userAgent")}"
   puts "platform: #{page.evaluate("navigator.platform")}"
   puts "screen: #{page.evaluate("[screen.width, screen.height, screen.availHeight]").to_json}"
-  puts "language: #{page.evaluate("navigator.language")}"
+  puts "webdriver: #{page.evaluate("navigator.webdriver")}"
   puts "hardwareConcurrency: #{page.evaluate("navigator.hardwareConcurrency")}"
 
   # The isolated world does not see the page's globals; the main world does.

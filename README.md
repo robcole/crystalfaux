@@ -93,7 +93,7 @@ CRYSTALFAUX_CAMOUFOX=/path/to/camoufox crystal run examples/quick_start.cr
 | [`screenshot.cr`](examples/screenshot.cr) | Viewport PNG, full-page JPEG and a clipped WebP. |
 | [`intercept.cr`](examples/intercept.cr) | Block images, answer a request without the network, add headers, read a response body. |
 | [`pool.cr`](examples/pool.cr) | Run jobs on a pool of browsers that the pool replaces. |
-| [`fingerprint.cr`](examples/fingerprint.cr) | Launch with a validated fingerprint config and use the main world. |
+| [`fingerprint.cr`](examples/fingerprint.cr) | Launch with the committed macOS fingerprint ([`examples/fingerprints/`](examples/fingerprints/README.md)) or a config file, and use the main world. |
 
 ## Evaluate JavaScript
 
@@ -259,7 +259,8 @@ These limits are known. Some are deliberate; others are future work.
 - **Fingerprint generation.** crystalfaux does not port fpgen, the
   statistical model that Camoufox's packages use to generate
   fingerprints. Use `Config.for` for a small, consistent config, or load a
-  config that Camoufox's packages generated.
+  config that Camoufox's packages generated, such as the one in
+  [`examples/fingerprints/`](examples/fingerprints/README.md).
 - **Identity alignment.** crystalfaux does not align the locale, time zone,
   WebRTC IP or GeoIP data with a proxy. Set these config keys yourself.
 - **Isolated world.** `Page#evaluate` uses the isolated world by default.

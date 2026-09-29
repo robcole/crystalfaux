@@ -86,3 +86,21 @@ describe "fingerprint configs and proxies", tags: "browser" do
     proxy.try &.close
   end
 end
+
+describe "the committed macOS desktop fingerprint", tags: "browser" do
+  it "reports its user agent and screen size, and no webdriver" do
+    dir = Path[__DIR__, "..", "..", "examples", "fingerprints"]
+    config = Crystalfaux::Fingerprint::Config.from_json(File.read(dir / "macos-desktop.json"))
+    prefs = JSON.parse(File.read(dir / "macos-desktop.prefs.json")).as_h
+    browser = Crystalfaux::Browser.launch(config: config, prefs: prefs,
+      options: Crystalfaux::Launcher::Options.new(executable: camoufox_binary))
+    page = browser.new_context.new_page
+    page.goto("data:text/html,<title>fingerprint</title>")
+
+    page.evaluate("navigator.userAgent").should eq(config["navigator.userAgent"])
+    page.evaluate("[screen.width, screen.height]").should eq(JSON::Any.new([config["screen.width"], config["screen.height"]]))
+    page.evaluate("navigator.webdriver").should eq(JSON::Any.new(false))
+  ensure
+    browser.try &.close
+  end
+end
