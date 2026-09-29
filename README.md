@@ -14,10 +14,26 @@ through the Playwright Python bindings.
 crystalfaux gives Crystal projects a similar API that drives Camoufox
 directly, without Node or Python at runtime.
 
+## About Juggler
+
+Juggler is a remote protocol for Firefox. It is not part of upstream
+Firefox: Mozilla's own automation protocol is WebDriver BiDi. Juggler
+started as the experimental Firefox support in Puppeteer. It then moved to
+the Playwright project, which keeps it as a set of Firefox patches in
+[`browser_patches/firefox/juggler`](https://github.com/microsoft/playwright/tree/main/browser_patches/firefox/juggler).
+The Firefox builds of Playwright include these patches. Camoufox applies
+them too, so it speaks Juggler.
+
+Juggler messages are JSON objects. When a client starts the browser with a
+pipe, the browser reads NUL-terminated messages from file descriptor 3 and
+writes them to file descriptor 4. The Playwright drivers for Node and
+Python use this pipe. crystalfaux uses the same pipe directly, so it does
+not need a Playwright driver.
+
 ## Scope
 
-- **Protocol**: a Crystal client for Juggler, the Firefox protocol of
-  Playwright, over the browser's pipe.
+- **Protocol**: a Crystal client for [Juggler](#about-juggler), the Firefox
+  automation protocol of the Playwright project, over the browser's pipe.
 - **Launching and configuration**: find or fetch the Camoufox binary, pass
   fingerprint and config options, and manage the browser process.
 - **API**: browsers, contexts, pages, navigation, selectors, input, network
