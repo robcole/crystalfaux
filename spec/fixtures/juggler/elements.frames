@@ -3,42 +3,60 @@
 > {"id":2,"method":"Browser.getInfo","params":{}}
 < {"id":2,"result":{"version":"Firefox/152.0.4-beta.31","userAgent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Camoufox/152.0.4-beta.31"}}
 > {"id":3,"method":"Browser.createBrowserContext","params":{"removeOnDetach":true}}
-< {"id":3,"result":{"browserContextId":"7f012c9d-7bd6-43ff-ad4b-c55b7b1d3c0b"}}
-> {"id":4,"method":"Browser.newPage","params":{"browserContextId":"7f012c9d-7bd6-43ff-ad4b-c55b7b1d3c0b"}}
-< {"method":"Browser.attachedToTarget","params":{"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1","targetInfo":{"targetId":"e7c96010-b452-4339-bfac-dd25a416d567","type":"page","browserContextId":"7f012c9d-7bd6-43ff-ad4b-c55b7b1d3c0b"}}}
-< {"id":4,"result":{"targetId":"e7c96010-b452-4339-bfac-dd25a416d567"}}
-< {"method":"Page.frameAttached","params":{"frameId":"mainframe-10"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Runtime.executionContextsCleared","params":{},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-> {"id":5,"method":"Page.navigate","params":{"frameId":"mainframe-10","url":"data:text/html,<!DOCTYPE html><div style='height:2000px'></div><button>Buy</button>"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-1","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-1"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-2","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-14"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-14","url":"about:blank","name":""},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.ready","sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":5,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1","result":{"navigationId":"nav-21"}}
-< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-21"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-2"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-3","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-21","url":"data:text/html,<!DOCTYPE html><div style='height:2000px'></div><button>Buy</button>","name":""},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-> {"id":6,"method":"Runtime.callFunction","params":{"executionContextId":"id-3","functionDeclaration":"selector => Array.from(document.querySelectorAll(selector))","returnByValue":false,"args":[{"value":"button"}]},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":6,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1","result":{"result":{"objectId":"id-4","type":"object","subtype":"array"}}}
-> {"id":7,"method":"Runtime.getObjectProperties","params":{"executionContextId":"id-3","objectId":"id-4"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":7,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1","result":{"properties":[{"name":"0","value":{"objectId":"id-5","type":"object","subtype":"node"}}]}}
-> {"id":8,"method":"Runtime.disposeObject","params":{"executionContextId":"id-3","objectId":"id-4"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":8,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-> {"id":9,"method":"Page.scrollIntoViewIfNeeded","params":{"frameId":"mainframe-10","objectId":"id-5"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":9,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-> {"id":10,"method":"Page.getContentQuads","params":{"frameId":"mainframe-10","objectId":"id-5"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":10,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1","result":{"quads":[{"p1":{"x":8,"y":959},"p2":{"x":43.483333587646484,"y":959},"p3":{"x":43.483333587646484,"y":981},"p4":{"x":8,"y":981}}]}}
-> {"id":11,"method":"Runtime.disposeObject","params":{"executionContextId":"id-3","objectId":"id-5"},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":11,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-> {"id":12,"method":"Page.close","params":{},"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"id":12,"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1"}
-< {"method":"Browser.detachedFromTarget","params":{"sessionId":"ff0c5ae9-f1fb-459d-9d1e-c4603bdff7b1","targetId":"e7c96010-b452-4339-bfac-dd25a416d567"}}
-> {"id":13,"method":"Browser.removeBrowserContext","params":{"browserContextId":"7f012c9d-7bd6-43ff-ad4b-c55b7b1d3c0b"}}
-< {"id":13}
+< {"id":3,"result":{"browserContextId":"d189cfea-2cdb-4979-88c0-294b114bf7cb"}}
+> {"id":4,"method":"Browser.newPage","params":{"browserContextId":"d189cfea-2cdb-4979-88c0-294b114bf7cb"}}
+< {"method":"Browser.attachedToTarget","params":{"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","targetInfo":{"targetId":"93672369-7462-4cdd-b44c-ff71d35b8cfd","type":"page","browserContextId":"d189cfea-2cdb-4979-88c0-294b114bf7cb"}}}
+< {"id":4,"result":{"targetId":"93672369-7462-4cdd-b44c-ff71d35b8cfd"}}
+< {"method":"Page.frameAttached","params":{"frameId":"mainframe-10"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextsCleared","params":{},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":5,"method":"Page.navigate","params":{"frameId":"mainframe-10","url":"data:text/html,<!DOCTYPE html><div style='height:2000px'></div><button>Buy</button>"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-1","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-1"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-2","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-14"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-14","url":"about:blank","name":""},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.ready","sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":5,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","result":{"navigationId":"nav-21"}}
+< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-21"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-2"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-3","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-21","url":"data:text/html,<!DOCTYPE html><div style='height:2000px'></div><button>Buy</button>","name":""},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":6,"method":"Runtime.callFunction","params":{"executionContextId":"id-3","functionDeclaration":"selector => Array.from(document.querySelectorAll(selector))","returnByValue":false,"args":[{"value":"button"}]},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":6,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","result":{"result":{"objectId":"id-4","type":"object","subtype":"array"}}}
+> {"id":7,"method":"Runtime.getObjectProperties","params":{"executionContextId":"id-3","objectId":"id-4"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":7,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","result":{"properties":[{"name":"0","value":{"objectId":"id-5","type":"object","subtype":"node"}}]}}
+> {"id":8,"method":"Runtime.disposeObject","params":{"executionContextId":"id-3","objectId":"id-4"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":8,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":9,"method":"Page.scrollIntoViewIfNeeded","params":{"frameId":"mainframe-10","objectId":"id-5"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":9,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":10,"method":"Page.getContentQuads","params":{"frameId":"mainframe-10","objectId":"id-5"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":10,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","result":{"quads":[{"p1":{"x":8,"y":959},"p2":{"x":43.483333587646484,"y":959},"p3":{"x":43.483333587646484,"y":981},"p4":{"x":8,"y":981}}]}}
+> {"id":11,"method":"Runtime.disposeObject","params":{"executionContextId":"id-3","objectId":"id-5"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":11,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":12,"method":"Page.navigate","params":{"frameId":"mainframe-10","url":"data:text/html,<!DOCTYPE html><iframe srcdoc='<p>inner</p>'></iframe>"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":12,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","result":{"navigationId":"nav-23"}}
+< {"method":"Page.navigationStarted","params":{"frameId":"mainframe-10","navigationId":"nav-23"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextDestroyed","params":{"executionContextId":"id-3"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-6","auxData":{"frameId":"mainframe-10","name":""}},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"mainframe-10","navigationId":"nav-23","url":"data:text/html,<!DOCTYPE html><iframe srcdoc='<p>inner</p>'></iframe>","name":""},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.frameAttached","params":{"frameId":"subframe-8589934593","parentFrameId":"mainframe-10"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Runtime.executionContextCreated","params":{"executionContextId":"id-7","auxData":{"frameId":"subframe-8589934593","name":""}},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.navigationStarted","params":{"frameId":"subframe-8589934593","navigationId":"nav-8589934593"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"DOMContentLoaded"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.navigationCommitted","params":{"frameId":"subframe-8589934593","navigationId":"nav-8589934593","url":"about:srcdoc","name":""},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"subframe-8589934593","name":"DOMContentLoaded"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"subframe-8589934593","name":"load"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":13,"method":"Page.adoptNode","params":{"frameId":"subframe-8589934593","executionContextId":"id-6"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Page.eventFired","params":{"frameId":"mainframe-10","name":"load"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":13,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","result":{"remoteObject":{"objectId":"id-8","type":"object","subtype":"node"}}}
+> {"id":14,"method":"Runtime.disposeObject","params":{"executionContextId":"id-6","objectId":"id-8"},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":14,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+> {"id":15,"method":"Page.close","params":{},"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"id":15,"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7"}
+< {"method":"Browser.detachedFromTarget","params":{"sessionId":"f35a82a1-8b82-4ec7-93a2-b5deddd095d7","targetId":"93672369-7462-4cdd-b44c-ff71d35b8cfd"}}
+> {"id":16,"method":"Browser.removeBrowserContext","params":{"browserContextId":"d189cfea-2cdb-4979-88c0-294b114bf7cb"}}
+< {"id":16}

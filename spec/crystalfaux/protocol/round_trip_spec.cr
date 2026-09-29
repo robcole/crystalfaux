@@ -38,6 +38,7 @@ describe "Juggler protocol round trip" do
     round_trip.failures.should be_empty
     %w[
       Runtime.getObjectProperties Runtime.disposeObject Page.scrollIntoViewIfNeeded Page.getContentQuads
+      Page.adoptNode
     ].each do |method|
       round_trip.decoded.should contain(method)
       round_trip.decoded.should contain("#{method} result")

@@ -31,8 +31,9 @@ recording; the specs do not depend on them.
 `data:` page with a button below the fold, a `Runtime.callFunction` that
 returns an array handle, `Runtime.getObjectProperties` for its element
 handles, `Page.scrollIntoViewIfNeeded`, `Page.getContentQuads` and
-`Runtime.disposeObject`. It was recorded on 2026-09-28 by the same spec and
-does not end with `Browser.close`.
+`Runtime.disposeObject`, then a page with an `<iframe>` whose element
+`Page.adoptNode` returns as a handle. It was recorded on 2026-09-28 by the
+same spec and does not end with `Browser.close`.
 
 ## Record again
 

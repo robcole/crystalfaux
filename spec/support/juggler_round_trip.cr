@@ -23,7 +23,7 @@ class JugglerRoundTrip
     Protocol::Page::Navigate, Protocol::Page::Close, Protocol::Page::SetViewportSize,
     Protocol::Page::Screenshot, Protocol::Page::DispatchKeyEvent, Protocol::Page::DispatchMouseEvent,
     Protocol::Page::DispatchWheelEvent, Protocol::Page::InsertText,
-    Protocol::Page::ScrollIntoViewIfNeeded, Protocol::Page::GetContentQuads,
+    Protocol::Page::ScrollIntoViewIfNeeded, Protocol::Page::GetContentQuads, Protocol::Page::AdoptNode,
     Protocol::Runtime::Evaluate, Protocol::Runtime::CallFunction,
     Protocol::Runtime::GetObjectProperties, Protocol::Runtime::DisposeObject,
     Protocol::Network::SetRequestInterception, Protocol::Network::SetExtraHTTPHeaders,

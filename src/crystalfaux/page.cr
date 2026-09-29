@@ -192,7 +192,7 @@ module Crystalfaux
 
     # Runs `Frame#evaluate` for *frame*, a frame of this page.
     protected def evaluate_in(frame : Frame, expression : String, world : World, deadline : Time::Instant) : JSON::Any
-      context_id = frame.default_context_id || raise ExecutionContextDestroyed.new("Frame #{frame.id} has no execution context")
+      context_id = context_id_for(frame)
       outcome = case world
                 in .isolated?
                   call_in_context(frame, context_id, Protocol::Runtime::Evaluate.new(context_id, expression, return_by_value: true), deadline)
@@ -203,6 +203,17 @@ module Crystalfaux
       case world
       in .isolated? then value_of(result)
       in .main?     then Protocol::Runtime::MainWorld.decode(result.try(&.value))
+      end
+    end
+
+    # The current execution context of *frame*'s default world. Raises the
+    # page's failure first, so a page that closed or crashed between two
+    # documents does not look like a navigation, and then
+    # `ExecutionContextDestroyed` when the frame has no context.
+    protected def context_id_for(frame : Frame) : String
+      @lock.synchronize do
+        raise_failure
+        @context_frames.key_for?(frame) || raise ExecutionContextDestroyed.new("Frame #{frame.id} has no execution context")
       end
     end
 
@@ -321,9 +332,13 @@ module Crystalfaux
       call(Protocol::Page::SetViewportSize.new(size), Time.instant + timeout)
     end
 
-    # Sends one input event for `Keyboard` or `Mouse`.
-    protected def dispatch(event : Protocol::Request(Protocol::Empty)) : Nil
-      call(event, Time.instant + Browser::DEFAULT_TIMEOUT)
+    # Sends one input event for `Keyboard` or `Mouse`. Raises
+    # `TimeoutError` without sending the event when *deadline* has passed,
+    # so an action that ran out of time sends no more input.
+    protected def dispatch(event : Protocol::Request(Protocol::Empty),
+                           deadline : Time::Instant = Time.instant + Browser::DEFAULT_TIMEOUT) : Nil
+      raise TimeoutError.new("#{event.method_name} was not sent: the deadline passed") unless (deadline - Time.instant).positive?
+      call(event, deadline)
     end
 
     # Calls *handler* with each request of the page that the browser

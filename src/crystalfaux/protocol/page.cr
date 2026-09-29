@@ -256,6 +256,32 @@ module Crystalfaux::Protocol
       end
     end
 
+    # Makes a handle to a node in execution context *execution_context_id*.
+    # Without *object_id*, the node is the `<iframe>` element that shows
+    # frame *frame_id*, a handle in the parent frame's context (Camoufox
+    # `additions/juggler/content/PageAgent.js`, `_adoptNode`).
+    # *remote_object* is `nil` when that context may not see the node.
+    struct AdoptNode
+      include Message
+
+      # The reply of `AdoptNode`.
+      struct Result
+        include Message
+
+        field remote_object : Runtime::RemoteObject?, emit_null: true
+      end
+
+      include Request(Result)
+      METHOD = "Page.adoptNode"
+
+      field frame_id : String
+      field object_id : String?
+      field execution_context_id : String
+
+      def initialize(@frame_id : String, @execution_context_id : String, @object_id : String? = nil)
+      end
+    end
+
     # The `Page.ready` event.
     struct Ready
       include Message

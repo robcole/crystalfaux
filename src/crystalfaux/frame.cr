@@ -225,8 +225,53 @@ module Crystalfaux
     end
 
     # A `Runtime.callFunction` argument that holds *value* as JSON.
-    protected def argument(value : (String | Bool)?) : Protocol::Runtime::CallFunctionArgument
+    protected def argument(value : (String | Bool | Float64)?) : Protocol::Runtime::CallFunctionArgument
       Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new(value))
+    end
+
+    # Checks that a click at (*x*, *y*) in this frame's viewport passes
+    # through the `<iframe>` of each ancestor frame, as Playwright's
+    # `server/dom.ts` (`_checkFrameIsHitTarget`) does: an element of a
+    # parent document can cover the frame. Returns `"done"`, or the check
+    # that failed.
+    protected def check_hit_path(x : Float64, y : Float64, deadline : Time::Instant) : String
+      frame = self
+      while parent = frame.parent
+        result = parent.hit_test_child(frame, x, y, deadline)
+        return "done" if result["transformed"]?
+        verdict = result["result"]?.try(&.as_s?) || "the frame check returned nothing"
+        return verdict unless verdict == "done"
+        x, y = coordinate(result["x"]?), coordinate(result["y"]?)
+        frame = parent
+      end
+      "done"
+    end
+
+    # A coordinate that a script returned. `JSON.stringify` writes whole
+    # numbers without a fraction, so they decode as integers.
+    protected def coordinate(value : JSON::Any?) : Float64
+      raw = value.try(&.raw)
+      case raw
+      when Float64 then raw
+      when Int64   then raw.to_f
+      else              raise Error.new("Expected a coordinate, got #{value.to_json}")
+      end
+    end
+
+    # Runs `DomScripts::FRAME_HIT_TARGET` in this frame for the `<iframe>`
+    # of *child*, and releases the handle to that element.
+    protected def hit_test_child(child : Frame, x : Float64, y : Float64, deadline : Time::Instant) : JSON::Any
+      context_id = current_context_id
+      request = Protocol::Page::AdoptNode.new(child.id, context_id)
+      owner = @page.call_in_context(self, context_id, request, deadline).remote_object
+      owner_id = owner.try(&.object_id)
+      return JSON.parse(%({"result":"the frame's element is not reachable"})) unless owner_id
+      begin
+        arguments = [Protocol::Runtime::CallFunctionArgument.new(object_id: owner_id), argument(x), argument(y)]
+        @page.value_of(call_function(context_id, DomScripts::FRAME_HIT_TARGET, arguments, deadline, by_value: true))
+      ensure
+        release(context_id, owner_id, deadline)
+      end
     end
 
     # Releases the handle *object_id*. Best effort: when the context is
@@ -237,8 +282,9 @@ module Crystalfaux
       # The caller's own call reports what went wrong.
     end
 
-    private def current_context_id : String
-      default_context_id || raise ExecutionContextDestroyed.new("Frame #{@id} has no execution context")
+    # See `Page#context_id_for`.
+    protected def current_context_id : String
+      @page.context_id_for(self)
     end
 
     # Yields the deadline every *interval* until the block returns a value

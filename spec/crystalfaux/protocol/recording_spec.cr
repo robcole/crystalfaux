@@ -28,6 +28,8 @@ private class Probe
   # The page's main-world execution context, from the latest
   # `Runtime.executionContextCreated` event.
   @execution_context_id = ""
+  # The latest frame attached below the main frame.
+  @child_frame_id : String?
 
   def initialize(@connection : Crystalfaux::Juggler::Connection, @relay : RecordingRelay)
   end
@@ -73,7 +75,8 @@ private class Probe
   # Opens a page with a button below the fold and uses the element
   # methods on it: handles by `Runtime.callFunction`, a list of handles by
   # `Runtime.getObjectProperties`, `Page.scrollIntoViewIfNeeded`,
-  # `Page.getContentQuads` and `Runtime.disposeObject`.
+  # `Page.getContentQuads` and `Runtime.disposeObject`; then a page with an
+  # `<iframe>`, whose element `Page.adoptNode` gives as a handle.
   def run_elements : Nil
     open_page
     load("data:text/html,<!DOCTYPE html><div style='height:2000px'></div><button>Buy</button>")
@@ -87,6 +90,10 @@ private class Probe
     call(Protocol::Page::ScrollIntoViewIfNeeded.new(@frame_id, button_id))
     call(Protocol::Page::GetContentQuads.new(@frame_id, button_id)).quads.size.should eq(1)
     call(Protocol::Runtime::DisposeObject.new(@execution_context_id, button_id))
+    load("data:text/html,<!DOCTYPE html><iframe srcdoc='<p>inner</p>'></iframe>")
+    child_frame_id = @child_frame_id.should_not(be_nil)
+    owner = call(Protocol::Page::AdoptNode.new(child_frame_id, @execution_context_id)).remote_object
+    call(Protocol::Runtime::DisposeObject.new(@execution_context_id, owner.try(&.object_id).should_not(be_nil)))
     close_page
   end
 
@@ -153,9 +160,16 @@ private class Probe
   end
 
   private def observe(message : JSON::Any) : Nil
-    return unless message["method"]? == Protocol::Runtime::ExecutionContextCreated::METHOD
-    created = Protocol.decode(Protocol::Runtime::ExecutionContextCreated, message["params"])
-    @execution_context_id = created.execution_context_id if created.aux_data.name.presence.nil?
+    case message["method"]?
+    when Protocol::Runtime::ExecutionContextCreated::METHOD
+      created = Protocol.decode(Protocol::Runtime::ExecutionContextCreated, message["params"])
+      aux_data = created.aux_data
+      return unless aux_data.name.presence.nil? && aux_data.frame_id == @frame_id
+      @execution_context_id = created.execution_context_id
+    when Protocol::Page::FrameAttached::METHOD
+      attached = Protocol.decode(Protocol::Page::FrameAttached, message["params"])
+      @child_frame_id = attached.frame_id if attached.parent_frame_id
+    end
   end
 end
 

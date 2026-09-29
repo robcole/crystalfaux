@@ -67,39 +67,32 @@ module Crystalfaux
       end
 
       # Moves the mouse to (*x*, *y*) in *steps* even moves from where it is.
-      def move(x : Float64, y : Float64, steps : Int32 = 1) : Nil
-        from_x, from_y = @lock.synchronize { {@x, @y} }
-        (1..steps).each do |step|
-          fraction = step / steps
-          to_x = from_x + (x - from_x) * fraction
-          to_y = from_y + (y - from_y) * fraction
-          @lock.synchronize do
-            @x = to_x
-            @y = to_y
-          end
-          send_button_event(:mousemove, Button::Left, click_count: nil)
-        end
+      def move(x : Float64, y : Float64, steps : Int32 = 1, *, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+        move_to(x, y, steps, Time.instant + timeout)
       end
 
       # Presses *button* where the mouse is.
-      def down(button : Button = :left, click_count : Int32 = 1) : Nil
-        @lock.synchronize { @buttons << button }
-        send_button_event(:mousedown, button, click_count)
+      def down(button : Button = :left, click_count : Int32 = 1, *, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+        press(button, click_count, Time.instant + timeout)
       end
 
       # Releases *button* where the mouse is.
-      def up(button : Button = :left, click_count : Int32 = 1) : Nil
-        @lock.synchronize { @buttons.delete(button) }
-        send_button_event(:mouseup, button, click_count)
+      def up(button : Button = :left, click_count : Int32 = 1, *, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+        release(button, click_count, Time.instant + timeout)
       end
 
       # Moves to (*x*, *y*) and clicks *button* *click_count* times; 2 is a
       # double click.
-      def click(x : Float64, y : Float64, button : Button = :left, click_count : Int32 = 1) : Nil
-        move(x, y)
+      #
+      # *timeout* covers all the events. Raises `TimeoutError` when it
+      # passes, and sends no event after that.
+      def click(x : Float64, y : Float64, button : Button = :left, click_count : Int32 = 1, *,
+                timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+        deadline = Time.instant + timeout
+        move_to(x, y, 1, deadline)
         (1..click_count).each do |count|
-          down(button, count)
-          up(button, count)
+          press(button, count, deadline)
+          release(button, count, deadline)
         end
       end
 
@@ -117,12 +110,45 @@ module Crystalfaux
           modifiers: @keyboard.modifiers.value))
       end
 
+      private def move_to(x : Float64, y : Float64, steps : Int32, deadline : Time::Instant) : Nil
+        from_x, from_y = @lock.synchronize { {@x, @y} }
+        (1..steps).each do |step|
+          fraction = step / steps
+          to_x = from_x + (x - from_x) * fraction
+          to_y = from_y + (y - from_y) * fraction
+          @lock.synchronize do
+            @x = to_x
+            @y = to_y
+          end
+          send_button_event(:mousemove, Button::Left, nil, deadline)
+        end
+      end
+
+      # The button state changes only when the event can still be sent.
+      private def press(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
+        check_deadline(:mousedown, deadline)
+        @lock.synchronize { @buttons << button }
+        send_button_event(:mousedown, button, click_count, deadline)
+      end
+
+      private def release(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
+        check_deadline(:mouseup, deadline)
+        @lock.synchronize { @buttons.delete(button) }
+        send_button_event(:mouseup, button, click_count, deadline)
+      end
+
+      private def check_deadline(type : Protocol::Page::MouseEventType, deadline : Time::Instant) : Nil
+        return if (deadline - Time.instant).positive?
+        raise TimeoutError.new("The #{type.wire_name} event was not sent: the deadline passed")
+      end
+
       # A move always reports the left button, as Playwright's `ffInput.ts`
       # does. Juggler takes whole pixels (Playwright floors them too).
-      private def send_button_event(type : Protocol::Page::MouseEventType, button : Button, click_count : Int32?) : Nil
+      private def send_button_event(type : Protocol::Page::MouseEventType, button : Button, click_count : Int32?,
+                                    deadline : Time::Instant) : Nil
         x, y, buttons = @lock.synchronize { {@x, @y, @buttons.sum(&.mask)} }
         @page.dispatch(Protocol::Page::DispatchMouseEvent.new(type, x.floor, y.floor, button: button.number,
-          buttons: buttons, modifiers: @keyboard.modifiers.value, click_count: click_count))
+          buttons: buttons, modifiers: @keyboard.modifiers.value, click_count: click_count), deadline)
       end
     end
   end

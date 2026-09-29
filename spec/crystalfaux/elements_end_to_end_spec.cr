@@ -72,6 +72,33 @@ private PAGES = {
     <style>@keyframes slide { from { left: 0 } to { left: 300px } }</style>
     <div id="cover"></div>
     HTML
+  "/framed" => <<-HTML,
+    <!doctype html><title>framed</title>
+    <style>
+      body { margin: 0; }
+      iframe { position: absolute; left: 50px; top: 40px; width: 300px; height: 200px; border: 5px solid; padding: 3px; }
+      #cover { position: fixed; inset: 0; background: rgba(0,0,0,.3); }
+    </style>
+    <iframe src="/inner"></iframe>
+    <div id="cover" onclick="document.body.dataset.coverClicked = 'yes'"></div>
+    HTML
+  "/inner" => <<-HTML,
+    <!doctype html><title>inner</title>
+    <style>body { margin: 0; } #target { position: absolute; left: 100px; top: 100px; }</style>
+    <button id="target" onclick="document.body.dataset.clicked = 'yes'">Inner</button>
+    HTML
+  "/contents" => <<-HTML,
+    <!doctype html><title>contents</title>
+    <div id="hidden-text" style="display: contents; visibility: hidden">Invisible</div>
+    <div id="override" style="display: contents; visibility: hidden"><span style="visibility: visible">Shown</span></div>
+    <div id="empty" style="display: contents"></div>
+    <button style="display: contents">Buy</button>
+    <button style="display: contents; visibility: hidden">Ghost</button>
+    <button aria-labelledby="real-name" aria-label="Label name">Content name</button>
+    <span id="real-name">Labelled name</span>
+    <button role="tab">Specs tab</button>
+    <a href="/x">Visible <span style="display: none">secret</span>link</a>
+    HTML
   "/second" => <<-HTML,
     <!doctype html><title>second</title><p id="late"></p>
     <script>setTimeout(() => { document.getElementById('late').textContent = 'ready'; }, 300)</script>
@@ -185,6 +212,52 @@ describe Crystalfaux::ElementHandle, tags: "browser" do
     page.evaluate("document.getElementById('cover').remove()")
     button.click
     page.evaluate("document.body.dataset.clicked").should eq(JSON::Any.new("yes"))
+  ensure
+    browser.try &.close
+    server.try &.close
+  end
+
+  it "does not click through a cover in a parent frame" do
+    binary = camoufox_binary
+    server = ElementsServer.new
+    browser, page = open_page(binary)
+    page.goto("#{server.base_url}/framed")
+    frame = page.main_frame.children.first
+    target = frame.wait_for_selector("#target", timeout: 5.seconds).should_not(be_nil)
+
+    expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="cover">)) { target.click(timeout: 500.milliseconds) }
+    page.evaluate("document.body.dataset.coverClicked || null").should eq(JSON::Any.new(nil))
+    frame.evaluate("document.body.dataset.clicked || null").should eq(JSON::Any.new(nil))
+
+    page.evaluate("document.getElementById('cover').remove()")
+    target.click
+    frame.evaluate("document.body.dataset.clicked").should eq(JSON::Any.new("yes"))
+  ensure
+    browser.try &.close
+    server.try &.close
+  end
+
+  it "applies visibility to display: contents elements and names by role" do
+    binary = camoufox_binary
+    server = ElementsServer.new
+    browser, page = open_page(binary)
+    page.goto("#{server.base_url}/contents")
+
+    page.query_selector("#hidden-text").should_not(be_nil).visible?.should be_false
+    page.query_selector("#override").should_not(be_nil).visible?.should be_true
+    page.query_selector("#empty").should_not(be_nil).visible?.should be_false
+    page.wait_for_selector("#hidden-text", state: :hidden, timeout: 1.second).should be_nil
+
+    page.get_by_role("button", name: "Buy").size.should eq(1)
+    page.get_by_role("button", name: "Ghost").should be_empty
+    # aria-labelledby comes before aria-label and the content.
+    page.get_by_role("button", name: "Labelled name").size.should eq(1)
+    page.get_by_role("button", name: "Label name").should be_empty
+    # An explicit role replaces the implicit one.
+    page.get_by_role("button", name: "Specs tab").should be_empty
+    page.get_by_role("tab", name: "Specs tab").size.should eq(1)
+    # Hidden descendants are not part of the name.
+    page.get_by_role("link", name: "Visible link").size.should eq(1)
   ensure
     browser.try &.close
     server.try &.close

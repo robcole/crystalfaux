@@ -97,6 +97,59 @@ describe Crystalfaux::Frame do
     end
   end
 
+  describe "a page that goes away between documents" do
+    it "raises PageClosed from an evaluation, not ExecutionContextDestroyed" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+      page.wait_for_events_for_spec
+      page.close
+
+      expect_raises(Crystalfaux::PageClosed) { page.evaluate("1") }
+      expect_raises(Crystalfaux::PageClosed) { page.query_selector("#go") }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "ends a function wait with PageClosed at once" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+      page.wait_for_events_for_spec
+      outcome = async { page.wait_for_function("true", timeout: 5.seconds, polling: 10.milliseconds) }
+      quiet?(outcome, 50.milliseconds).should be_true
+
+      page.close
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::PageClosed)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "ends a selector wait with PageCrashed at once" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+      page.wait_for_events_for_spec
+      outcome = Channel(Crystalfaux::ElementHandle? | Exception).new(1)
+      spawn do
+        outcome.send(page.wait_for_selector("#go", timeout: 5.seconds))
+      rescue ex
+        outcome.send(ex)
+      end
+      quiet?(outcome, 150.milliseconds).should be_true
+
+      fake.event("Page.crashed", nil)
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::PageCrashed)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
   describe "#wait_for_selector" do
     it "returns a handle once the element reaches the state" do
       browser, fake = scripted_browser

@@ -18,22 +18,33 @@ module Crystalfaux
   # Camoufox makes an isolated sandbox: they see the DOM, not the page's
   # globals. Each is one function expression; shared helpers are pasted in.
   module DomScripts
+    # Whether text node *text* has a non-empty box (Playwright
+    # `injected/domUtils.ts`, `isVisibleTextNode`). The box does not show
+    # `visibility`; the caller checks the parent's style.
+    HAS_TEXT_BOX = <<-JS
+      const hasTextBox = text => {
+        const range = text.ownerDocument.createRange();
+        range.selectNode(text);
+        const box = range.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      };
+      JS
+
     # Playwright's `isElementVisible` (`injected/domUtils.ts`): rendered,
     # `visibility: visible`, and a non-empty box. An element with
-    # `display: contents` is visible when a child is.
+    # `display: contents` has no box: it is visible when a child element is,
+    # or when a text child has a box and the element's own `visibility`,
+    # which its text inherits, is `visible`. A child element can override
+    # an inherited `visibility: hidden`.
     IS_VISIBLE = <<-JS
+      #{HAS_TEXT_BOX}
       const isVisible = el => {
         if (!el.isConnected) return false;
         const style = el.ownerDocument.defaultView.getComputedStyle(el);
         if (style.display === 'contents') {
           for (let child = el.firstChild; child; child = child.nextSibling) {
             if (child.nodeType === 1 && isVisible(child)) return true;
-            if (child.nodeType === 3 && child.data.trim()) {
-              const range = el.ownerDocument.createRange();
-              range.selectNodeContents(child);
-              const box = range.getBoundingClientRect();
-              if (box.width > 0 && box.height > 0) return true;
-            }
+            if (child.nodeType === 3 && style.visibility === 'visible' && hasTextBox(child)) return true;
           }
           return false;
         }
@@ -95,18 +106,11 @@ module Crystalfaux
       }
       JS
 
-    # Whether a click at the centre of the element's first box reaches the
-    # element or a descendant (Playwright `injected/injectedScript.ts`,
-    # `expectHitTarget`). Returns `"done"`, or which element is on top. The
-    # first box is the first quad that `Page.getContentQuads` reports, in
-    # the element's own frame.
-    HIT_TARGET = <<-JS
-      el => {
-        if (!el.isConnected) return 'notconnected';
-        const boxes = el.getClientRects();
-        if (!boxes.length) return 'element is not visible';
-        const box = boxes[0];
-        const x = box.left + box.width / 2, y = box.top + box.height / 2;
+    # Whether a click at (*x*, *y*) in *el*'s document reaches *el* or a
+    # descendant (Playwright `injected/injectedScript.ts`,
+    # `expectHitTarget`). Returns `"done"`, or which element is on top.
+    HIT_TEST = <<-JS
+      const hitTest = (el, x, y) => {
         const root = el.getRootNode();
         const hit = (root.elementFromPoint ? root : el.ownerDocument).elementFromPoint(x, y);
         if (!hit) return 'element is outside of the viewport';
@@ -119,6 +123,42 @@ module Crystalfaux
           if (value) text += ' ' + name + '="' + (value.length > 40 ? value.slice(0, 40) + '…' : value) + '"';
         }
         return 'covered by ' + text + '>';
+      };
+      JS
+
+    # Hit-tests the centre of the element's first box in its own frame.
+    # Returns `{result, x, y}`: `HIT_TEST`'s result, or `"notconnected"`,
+    # and the point in the frame's viewport. The first box is the first
+    # quad that `Page.getContentQuads` reports.
+    HIT_TARGET = <<-JS
+      el => {
+        #{HIT_TEST}
+        if (!el.isConnected) return {result: 'notconnected'};
+        const boxes = el.getClientRects();
+        if (!boxes.length) return {result: 'element is not visible'};
+        const box = boxes[0];
+        const x = box.left + box.width / 2, y = box.top + box.height / 2;
+        return {result: hitTest(el, x, y), x, y};
+      }
+      JS
+
+    # Hit-tests, in the parent frame, the point (*x*, *y*) of the child
+    # frame's viewport that *iframe* shows (Playwright `server/dom.ts`,
+    # `_checkFrameIsHitTarget`, and `injected/injectedScript.ts`,
+    # `describeIFrameStyle`). Returns `{result, x, y}` with the point in the
+    # parent frame's viewport. A transformed `<iframe>` maps points in a way
+    # this does not follow; as Playwright does, the check then stops with
+    # `{result: 'done', transformed: true}`.
+    FRAME_HIT_TARGET = <<-JS
+      (iframe, x, y) => {
+        #{HIT_TEST}
+        if (!iframe.isConnected) return {result: 'notconnected'};
+        const style = iframe.ownerDocument.defaultView.getComputedStyle(iframe);
+        if (style.transform !== 'none') return {result: 'done', transformed: true};
+        const box = iframe.getBoundingClientRect();
+        const px = x + box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+        const py = y + box.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
+        return {result: hitTest(iframe, px, py), x: px, y: py};
       }
       JS
 
@@ -132,7 +172,10 @@ module Crystalfaux
     #   implicit role for `button`, `link`, `dialog`, `checkbox` and
     #   `heading` (`getImplicitAriaRole`).
     # - Hidden elements are left out: under `aria-hidden="true"`, not
-    #   rendered, or `visibility: hidden` (`isElementHiddenForAria`).
+    #   rendered, or `visibility: hidden` (`isElementHiddenForAria`). An
+    #   element with `display: contents` counts as rendered when a child
+    #   element is, or a text child is and the element is `visibility:
+    #   visible`.
     # - The name is the first non-empty of: `aria-labelledby` (the text of
     #   the referenced elements), `aria-label`, an input's value, `alt` or
     #   `<label>`, the content for name-from-content roles, and `title`.
@@ -162,7 +205,24 @@ module Crystalfaux
           const found = implicitRoles.find(([, selector]) => el.matches(selector));
           return found ? found[0] : null;
         };
-        const hidden = el => !!el.closest('[aria-hidden="true"]') || !el.checkVisibility({visibilityProperty: true});
+        const hasTextBox = text => {
+          const range = text.ownerDocument.createRange();
+          range.selectNode(text);
+          const box = range.getBoundingClientRect();
+          return box.width > 0 && box.height > 0;
+        };
+        // An element with display: contents has no box of its own: it is
+        // rendered when a child is (isElementHiddenForAria).
+        const rendered = el => {
+          const style = el.ownerDocument.defaultView.getComputedStyle(el);
+          if (style.display !== 'contents' || el.localName === 'slot') return el.checkVisibility({visibilityProperty: true});
+          for (let child = el.firstChild; child; child = child.nextSibling) {
+            if (child.nodeType === 1 && !hidden(child)) return true;
+            if (child.nodeType === 3 && style.visibility === 'visible' && hasTextBox(child)) return true;
+          }
+          return false;
+        };
+        const hidden = el => !!el.closest('[aria-hidden="true"]') || !rendered(el);
         const content = node => {
           let text = '';
           for (let child = node.firstChild; child; child = child.nextSibling) {
