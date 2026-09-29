@@ -24,6 +24,30 @@ describe Crystalfaux::Browser do
     end
   end
 
+  describe ".connect with prefs" do
+    it "sends bool, int and string prefs as userPrefs of Browser.enable" do
+      connection, peer = connected_pair
+      fake = ScriptedBrowser.new(peer)
+      prefs = {
+        "javascript.options.wasm" => JSON::Any.new(false),
+        "media.autoplay.default"  => JSON::Any.new(5_i64),
+        "intl.accept_languages"   => JSON::Any.new("fr-FR, fr"),
+      }
+      browser = Crystalfaux::Browser.connect(connection, prefs: prefs)
+
+      enable = fake.request("Browser.enable")
+      enable["params"]["userPrefs"].should eq(JSON.parse(<<-JSON))
+        [{"name": "javascript.options.wasm", "value": false},
+         {"name": "media.autoplay.default", "value": 5},
+         {"name": "intl.accept_languages", "value": "fr-FR, fr"}]
+        JSON
+
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
   describe ".connect" do
     it "removes its handlers from the connection when the handshake fails" do
       connection, peer = connected_pair

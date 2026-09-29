@@ -45,12 +45,11 @@ module Crystalfaux::Launcher
   # without inherited `CAMOU_CONFIG*` and `CAMOU_PREFS*` variables, then the
   # config and prefs as JSON chunks, then `options.env`.
   #
-  # The prefs are serialized here as `CAMOU_PREFS_n`. Camoufox builds newer
-  # than the supported range read these variables in `camoufox.cfg` and
-  # apply the prefs at startup. The supported `152.0.4-beta.30` and
-  # `beta.31` builds do not read them, so the prefs have no effect there
-  # (see `Options`). A fix that also sends them through `Browser.enable`
-  # `userPrefs` is scheduled.
+  # The prefs are serialized here as `CAMOU_PREFS_n`. Only Camoufox builds
+  # newer than the supported range read these variables in `camoufox.cfg`
+  # (from commit `ec37d722`). The `camoufox.cfg` of the supported
+  # `152.0.4-beta.30` and `beta.31` builds does not, so `Browser.connect`
+  # also sends the same prefs through `Browser.enable` `userPrefs`.
   #
   # Migration: earlier versions of this method returned only the variables to
   # add (the chunks and `options.env`), and the child inherited the rest.

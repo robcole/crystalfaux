@@ -30,3 +30,17 @@ describe Crystalfaux::Browser, tags: "browser" do
     browser.try &.close
   end
 end
+
+describe "Crystalfaux::Browser.launch with prefs", tags: "browser" do
+  it "applies a pref that a page can observe" do
+    options = Crystalfaux::Launcher::Options.new(executable: camoufox_binary, headless: true,
+      prefs: {"javascript.options.wasm" => JSON::Any.new(false)})
+    browser = Crystalfaux::Browser.launch(options)
+    page = browser.new_context.new_page
+    page.goto("data:text/html,<title>prefs</title>")
+
+    page.evaluate("typeof WebAssembly").should eq(JSON::Any.new("undefined"))
+  ensure
+    browser.try &.close
+  end
+end

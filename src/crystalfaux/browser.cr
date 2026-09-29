@@ -93,7 +93,7 @@ module Crystalfaux
       process = Launcher::BrowserProcess.launch(options.copy_with(executable: executable), timeout)
       connection = Juggler::Connection.new(process.transport)
       begin
-        connect(connection, process, timeout, proxy: proxy)
+        connect(connection, process, timeout, proxy: proxy, prefs: options.prefs)
       rescue ex
         process.close(connection)
         connection.close
@@ -102,20 +102,15 @@ module Crystalfaux
     end
 
     # Launches the browser with a fingerprint *config* and Firefox *prefs*,
-    # which replace those of *options*. Both travel to the browser in its
-    # environment (`Launcher.environment`). The browser applies the config
-    # at startup; see the note below for *prefs*.
+    # which replace those of *options*. The config travels to the browser in
+    # its environment (`Launcher.environment`), and the browser applies it
+    # at startup. The prefs are set in the handshake (see `.connect`).
     #
     # ```
     # config = Crystalfaux::Fingerprint::Config.for(os: :mac, screen: Crystalfaux::Fingerprint::Screen.new(1512, 982),
     #   user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0")
     # browser = Crystalfaux::Browser.launch(config: config)
     # ```
-    #
-    # NOTE: *prefs* have no effect on the supported builds
-    # (`152.0.4-beta.30` and `beta.31`). Their `camoufox.cfg` does not read
-    # `CAMOU_PREFS_n`; only newer Camoufox builds do. A fix that sends prefs
-    # through `Browser.enable` `userPrefs` is scheduled.
     def self.launch(*, config : Fingerprint::Config, prefs : Hash(String, JSON::Any) = {} of String => JSON::Any,
                     proxy : Proxy? = nil, options : Launcher::Options = Launcher::Options.new,
                     timeout : Time::Span = DEFAULT_TIMEOUT) : self
@@ -126,18 +121,26 @@ module Crystalfaux
     #
     # Drives the browser at the other end of *connection*: subscribes to
     # page targets, then sends `Browser.enable` (without the default
-    # context), `Browser.setBrowserProxy` when there is a *proxy*, and
-    # `Browser.getInfo`, as Playwright's `server/firefox/ffBrowser.ts` does.
-    # `.launch` and the specs use it.
+    # context, and with *prefs* as `userPrefs`), `Browser.setBrowserProxy`
+    # when there is a *proxy*, and `Browser.getInfo`, as Playwright's
+    # `server/firefox/ffBrowser.ts` does. `.launch` and the specs use it.
+    #
+    # Juggler sets each of *prefs* before it answers `Browser.enable`
+    # (`additions/juggler/protocol/BrowserHandler.js`), so pages opened
+    # after the handshake see them. This is how prefs reach the supported
+    # builds, whose `camoufox.cfg` does not read `CAMOU_PREFS_n`.
+    # A pref value must be a bool, an integer or a string; for any other
+    # value the browser rejects `Browser.enable` and this raises.
     #
     # The browser owns *connection* and *process* from then on. When the
     # handshake raises, it removes its handlers from *connection*, and the
     # caller still owns both.
     def self.connect(connection : Juggler::Connection, process : Launcher::BrowserProcess? = nil,
-                     timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil) : self
+                     timeout : Time::Span = DEFAULT_TIMEOUT, *, proxy : Proxy? = nil,
+                     prefs : Hash(String, JSON::Any) = {} of String => JSON::Any) : self
       browser = new(connection, process)
       begin
-        browser.handshake(timeout, proxy)
+        browser.handshake(timeout, proxy, prefs)
       rescue ex
         browser.unsubscribe
         raise ex
@@ -203,9 +206,9 @@ module Crystalfaux
       @lock.synchronize { @closed }
     end
 
-    protected def handshake(timeout : Time::Span, proxy : Proxy?) : Nil
+    protected def handshake(timeout : Time::Span, proxy : Proxy?, prefs : Hash(String, JSON::Any)) : Nil
       enable = Protocol::Browser::Enable.new(attach_to_default_context: false,
-        user_prefs: [] of Protocol::Browser::UserPreference)
+        user_prefs: prefs.map { |name, value| Protocol::Browser::UserPreference.new(name, value) })
       Protocol.call(@connection, enable, timeout: timeout)
       if proxy
         request = Protocol::Browser::SetBrowserProxy.new(proxy.type, proxy.host, proxy.port, proxy.bypass,

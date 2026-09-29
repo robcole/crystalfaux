@@ -141,6 +141,24 @@ browser = Crystalfaux::Browser.launch(proxy: proxy)
 context = browser.new_context(proxy: Crystalfaux::Proxy.new("other.example", 8080))
 ```
 
+Firefox preferences go in `prefs:`. Values can be booleans, integers or
+strings:
+
+```crystal
+prefs = {
+  "javascript.options.wasm"      => JSON::Any.new(false),
+  "dom.webnotifications.enabled" => JSON::Any.new(false),
+}
+browser = Crystalfaux::Browser.launch(config: config, prefs: prefs)
+```
+
+The browser sets the prefs when it connects, through `Browser.enable`
+`userPrefs`, before the first page opens. crystalfaux also sends them as
+`CAMOU_PREFS_n` environment variables, which newer Camoufox builds read at
+startup. On `152.0.4-beta.31`, `javascript.options.wasm`,
+`dom.webnotifications.enabled`, `dom.gamepad.enabled` and
+`dom.w3c_touch_events.enabled` were verified to change what a page sees.
+
 ## Network rules
 
 ```crystal
@@ -242,11 +260,6 @@ These limits are known. Some are deliberate; others are future work.
   config that Camoufox's packages generated.
 - **Identity alignment.** crystalfaux does not align the locale, time zone,
   WebRTC IP or GeoIP data with a proxy. Set these config keys yourself.
-- **Firefox preferences.** The `prefs:` argument of `Browser.launch` and
-  `Launcher::Options#prefs` currently have no effect. crystalfaux sends
-  them as `CAMOU_PREFS_n` environment variables, but the `camoufox.cfg` of
-  the supported builds does not read these variables; only newer Camoufox
-  builds do. A fix that sends prefs through `Browser.enable` is scheduled.
 - **Isolated world.** `Page#evaluate` uses the isolated world by default.
   The main world needs `allowMainWorld: true` in the config. In the
   isolated world, a promise that a page API returns, for example `fetch()`,
