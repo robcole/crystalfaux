@@ -42,6 +42,26 @@ private def on_function(fake : ScriptedBrowser, &block : String, JSON::Any -> Ar
   end
 end
 
+# Answers the checks of a click: the state check and the hit test pass
+# unless *hit_after_move* says what the hit test finds once the mouse has
+# moved. The quads put the centre at (120, 60).
+private def checks_pass(fake : ScriptedBrowser, hit_after_move : String = "done") : Nil
+  on_function(fake) do |function, _|
+    moved = fake.methods.includes?("Page.dispatchMouseEvent")
+    function == DomScripts::HIT_TARGET ? reply(verdict(moved ? hit_after_move : "done")) : reply(verdict("done"))
+  end
+  fake.on("Page.getContentQuads") { reply({quads: [quad(100, 50, 40, 20)]}) }
+end
+
+# The types of the mouse events sent so far.
+private def mouse_events(fake : ScriptedBrowser) : Array(String)
+  Array.new(fake.methods.count("Page.dispatchMouseEvent")) { fake.request("Page.dispatchMouseEvent")["params"]["type"].as_s }
+end
+
+# What a caller's guard raises when it sees a challenge.
+private class ChallengeSeen < Exception
+end
+
 describe Crystalfaux::ElementHandle do
   describe "queries" do
     it "finds one element as a handle in the frame's isolated context" do
@@ -590,6 +610,140 @@ describe Crystalfaux::ElementHandle do
       on_function(fake) { reply({result: {type: "string", value: "notconnected"}}) }
 
       expect_raises(Crystalfaux::ElementDetached) { handle.click(timeout: 5.seconds) }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "#click with a guard" do
+    it "runs the guard before each try of the checks" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_run = [] of Int32
+      on_function(fake) do |function, _|
+        checks_run << 1 if function == DomScripts::ACTIONABLE
+        reply(verdict("element is not visible"))
+      end
+      calls = 0
+      guard = -> do
+        calls += 1
+        raise ChallengeSeen.new("challenge") if calls == 3
+      end
+
+      expect_raises(ChallengeSeen) { handle.click(timeout: 5.seconds, guard: guard) }
+
+      checks_run.size.should eq(2)
+      fake.methods.should_not contain("Page.dispatchMouseEvent")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "runs the guard after the move and sends no press when it raises" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_pass(fake)
+      challenge = ChallengeSeen.new("challenge")
+      guard = -> do
+        raise challenge if fake.methods.includes?("Page.dispatchMouseEvent")
+      end
+
+      error = expect_raises(ChallengeSeen) { handle.click(timeout: 5.seconds, guard: guard) }
+      sleep 100.milliseconds
+
+      error.should be(challenge)
+      mouse_events(fake).should eq(["mousemove"])
+      fake.methods.count("Page.scrollIntoViewIfNeeded").should eq(1)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises a TimeoutError from the guard unchanged" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_pass(fake)
+      own = Crystalfaux::TimeoutError.new("the caller's own timeout")
+      guard = -> do
+        raise own if fake.methods.includes?("Page.dispatchMouseEvent")
+      end
+
+      error = expect_raises(Crystalfaux::TimeoutError) { handle.click(timeout: 5.seconds, guard: guard) }
+
+      error.should be(own)
+      mouse_events(fake).should eq(["mousemove"])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "does not press a target that the move changed, and tries the checks again" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_pass(fake, hit_after_move: %(covered by <div id="px-captcha">))
+
+      expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="px-captcha">)) do
+        handle.click(timeout: 400.milliseconds, guard: -> { })
+      end
+      sleep 100.milliseconds
+
+      mouse_events(fake).should eq(["mousemove"])
+      fake.methods.count("Page.scrollIntoViewIfNeeded").should be > 1
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "re-checks the target after the move without a guard too" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_pass(fake, hit_after_move: %(covered by <div id="px-captcha">))
+
+      expect_raises(Crystalfaux::TimeoutError, "px-captcha") { handle.click(timeout: 300.milliseconds) }
+      sleep 100.milliseconds
+
+      mouse_events(fake).should eq(["mousemove"])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "sends no press when the guard runs past the deadline" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_pass(fake)
+      guard = -> do
+        sleep 300.milliseconds if fake.methods.includes?("Page.dispatchMouseEvent")
+      end
+
+      expect_raises(Crystalfaux::TimeoutError) { handle.click(timeout: 200.milliseconds, guard: guard) }
+      sleep 100.milliseconds
+
+      mouse_events(fake).should eq(["mousemove"])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "keeps the release cleanup and does not retry after a press that was sent" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      checks_pass(fake)
+      fake.on("Page.dispatchMouseEvent") do |request|
+        request["params"]["type"] == "mousedown" ? [] of JSON::Any : reply({} of String => String)
+      end
+      calls = 0
+
+      error = expect_raises(Crystalfaux::TimeoutError) do
+        handle.click(timeout: 300.milliseconds, guard: -> { calls += 1; nil })
+      end
+      sleep 300.milliseconds
+
+      calls.should eq(2)
+      error.message.to_s.should contain("mousedown")
+      mouse_events(fake).should eq(%w[mousemove mousedown mouseup])
+      fake.methods.count("Page.getContentQuads").should eq(1)
     ensure
       browser.try &.close
       fake.try &.close

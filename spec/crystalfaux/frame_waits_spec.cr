@@ -21,6 +21,19 @@ end
 
 private DESTROYED = %(error in channel "content::10/11/4": exception while running method "evaluate" in namespace "page": Execution context was destroyed!)
 
+# What a caller's guard raises when it sees a challenge.
+private class ChallengeSeen < Exception
+end
+
+# A guard that passes once, then raises *error*: the wait polls once.
+private def guard_raising(error : Exception) : Crystalfaux::Guard
+  calls = 0
+  -> do
+    calls += 1
+    raise error if calls > 1
+  end
+end
+
 describe Crystalfaux::Frame do
   describe "#wait_for_function" do
     it "polls until the expression is truthy and returns that value" do
@@ -210,6 +223,69 @@ describe Crystalfaux::Frame do
       params = fake.request("Runtime.callFunction")["params"]
       params["functionDeclaration"].should eq(Crystalfaux::DomScripts::BY_ROLE)
       params["args"].should eq(json_frame([{value: "button"}, {value: "Add to cart"}, {value: false}]))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "waits with a guard" do
+    it "runs the guard before each poll of a function wait" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      replies_in_turn(fake, "Runtime.evaluate", [
+        reply({result: {type: "boolean", value: false}}),
+        reply({result: {type: "boolean", value: false}}),
+        reply({result: {type: "boolean", value: true}}),
+      ])
+      polls_before = [] of Int32
+      guard = -> { polls_before << fake.methods.count("Runtime.evaluate") }
+
+      page.wait_for_function("window.ready", polling: 10.milliseconds, guard: guard)
+
+      polls_before.should eq([0, 1, 2])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises the guard's exception unchanged and polls no more" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.evaluate") { reply({result: {type: "boolean", value: false}}) }
+      fake.on("Runtime.callFunction") { reply({result: {type: "boolean", value: false}}) }
+      {
+        ChallengeSeen.new("challenge"),
+        Crystalfaux::TimeoutError.new("the caller's own timeout"),
+        Crystalfaux::ExecutionContextDestroyed.new("the caller's own error"),
+      }.each do |raised|
+        waits = {
+          "Page#wait_for_function"  => {"Runtime.evaluate", -> { page.wait_for_function("window.ready", polling: 10.milliseconds, guard: guard_raising(raised)); nil }},
+          "Frame#wait_for_selector" => {"Runtime.callFunction", -> { page.main_frame.wait_for_selector(".dialog", guard: guard_raising(raised)); nil }},
+          "Page#wait_for_selector"  => {"Runtime.callFunction", -> { page.wait_for_selector(".dialog", guard: guard_raising(raised)); nil }},
+          "Frame#wait_for_function" => {"Runtime.evaluate", -> { page.main_frame.wait_for_function("window.ready", polling: 10.milliseconds, guard: guard_raising(raised)); nil }},
+        }
+        waits.each do |name, (method, wait)|
+          before = fake.methods.count(method)
+          error = expect_raises(Exception) { wait.call }
+          error.should be(raised), "#{name}: #{error.inspect}"
+          page.wait_for_events_for_spec
+          fake.methods.count(method).should eq(before + 1), name
+        end
+      end
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "ends the wait with TimeoutError when the guard runs past the deadline" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.callFunction") { reply({result: {type: "boolean", value: false}}) }
+
+      expect_raises(Crystalfaux::TimeoutError, /\.dialog/) do
+        page.wait_for_selector(".dialog", timeout: 100.milliseconds, guard: -> { sleep 150.milliseconds })
+      end
     ensure
       browser.try &.close
       fake.try &.close
