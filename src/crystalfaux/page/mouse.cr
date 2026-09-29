@@ -57,6 +57,12 @@ module Crystalfaux
       # Resolves at the next animation frame; Juggler awaits the promise.
       ANIMATION_FRAME_SCRIPT = "new Promise(requestAnimationFrame)"
 
+      # How long a release that cleans up after a press may wait for its
+      # reply. It does not depend on the deadline of the action, which can
+      # have passed. A page listener that is busy during the press also
+      # delays the release, so this allows for a slow listener.
+      RELEASE_TIMEOUT = 2.seconds
+
       @lock = Sync::Mutex.new
       @x = 0.0
       @y = 0.0
@@ -72,6 +78,10 @@ module Crystalfaux
       end
 
       # Presses *button* where the mouse is.
+      #
+      # When the press was sent but fails, for example because its reply
+      # does not come in time, the mouse releases *button* again; see
+      # `#click`.
       def down(button : Button = :left, click_count : Int32 = 1, *, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
         press(button, click_count, Time.instant + timeout)
       end
@@ -85,14 +95,30 @@ module Crystalfaux
       # double click.
       #
       # *timeout* covers all the events. Raises `TimeoutError` when it
-      # passes, and sends no event after that.
+      # passes. After that the mouse starts no other event, but a pressed
+      # button is always released, so no button stays down. The release
+      # of a sent press can take up to `RELEASE_TIMEOUT` after *timeout*.
+      #
+      # - When the deadline passes before a press, the press is not sent,
+      #   and the message says so.
+      # - When a press was sent, a failure of the press or the deadline
+      #   passing before the release makes the mouse send the release with
+      #   its own allowance, `RELEASE_TIMEOUT`. The `TimeoutError` then says
+      #   that the click is partial, and whether the release failed. When
+      #   the reply of a press or release did not come, the event may or may
+      #   not have reached the page; the message says that delivery is
+      #   uncertain.
+      #
+      # The mouse does not press again or retry. When the page or the
+      # connection is gone, no release can be sent, and the call raises
+      # that failure, such as `PageClosed`.
       def click(x : Float64, y : Float64, button : Button = :left, click_count : Int32 = 1, *,
                 timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
         deadline = Time.instant + timeout
         move_to(x, y, 1, deadline)
         (1..click_count).each do |count|
           press(button, count, deadline)
-          release(button, count, deadline)
+          release_pressed(button, count, deadline)
         end
       end
 
@@ -120,21 +146,76 @@ module Crystalfaux
             @x = to_x
             @y = to_y
           end
-          send_button_event(:mousemove, Button::Left, nil, deadline)
+          send_button_event(:mousemove, Button::Left, nil, held_buttons, deadline)
         end
       end
 
-      # The button state changes only when the event can still be sent.
+      # Sends the press, and holds *button* once the browser acknowledged
+      # it. When the press was sent but fails, releases *button*.
       private def press(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
         check_deadline(:mousedown, deadline)
+        begin
+          send_button_event(:mousedown, button, click_count, held_buttons | button.mask, deadline)
+        rescue ex
+          raise abandon_press(ex, button, click_count,
+            "The mousedown event was sent, but its reply did not come in time, so its delivery is uncertain")
+        end
         @lock.synchronize { @buttons << button }
-        send_button_event(:mousedown, button, click_count, deadline)
+      end
+
+      # Releases *button* after a press of `#click` that the browser
+      # acknowledged. The release is part of the action that the press
+      # started, so it is sent also when the deadline has passed, with
+      # `RELEASE_TIMEOUT`; the click then raises `TimeoutError`.
+      private def release_pressed(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
+        unless (deadline - Time.instant).positive?
+          raise abandon_press(TimeoutError.new("The deadline passed"), button, click_count,
+            "The deadline passed after the mousedown event and before the mouseup event")
+        end
+        release_deadline = {deadline, Time.instant + RELEASE_TIMEOUT}.max
+        send_release(button, click_count, release_deadline)
       end
 
       private def release(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
         check_deadline(:mouseup, deadline)
+        send_release(button, click_count, deadline)
+      end
+
+      # Stops holding *button*, then sends its release. A release that is
+      # not acknowledged is not sent again.
+      private def send_release(button : Button, click_count : Int32, deadline : Time::Instant) : Nil
         @lock.synchronize { @buttons.delete(button) }
-        send_button_event(:mouseup, button, click_count, deadline)
+        send_button_event(:mouseup, button, click_count, held_buttons, deadline)
+      rescue ex : TimeoutError
+        raise TimeoutError.new("The mouseup event was sent, but its reply did not come in time, " \
+                               "so its delivery is uncertain; the action is partial", cause: ex)
+      end
+
+      # Cleans up after *failure* of an action whose press was sent: stops
+      # holding *button* and releases it with `RELEASE_TIMEOUT`. Returns
+      # the error to raise: a `TimeoutError` that says what happened
+      # (*stage*) and how the release went, or *failure* itself when it is
+      # not a timeout, such as the failure of a closed page.
+      private def abandon_press(failure : Exception, button : Button, click_count : Int32, stage : String) : Exception
+        @lock.synchronize { @buttons.delete(button) }
+        cleanup = cleanup_release(button, click_count)
+        return failure unless failure.is_a?(TimeoutError)
+        TimeoutError.new("#{stage}; the action is partial. #{cleanup}", cause: failure)
+      end
+
+      # Sends the release for `#abandon_press` and describes the outcome.
+      # A closed page or connection raises at once, so this does not wait
+      # for a page that is gone.
+      private def cleanup_release(button : Button, click_count : Int32) : String
+        send_button_event(:mouseup, button, click_count, held_buttons, Time.instant + RELEASE_TIMEOUT)
+        "The mouseup event was sent to release the button."
+      rescue ex
+        "Releasing the button failed: #{ex.message}"
+      end
+
+      # The `buttons` mask of the held buttons.
+      private def held_buttons : Int32
+        @lock.synchronize { @buttons.sum(&.mask) }
       end
 
       private def check_deadline(type : Protocol::Page::MouseEventType, deadline : Time::Instant) : Nil
@@ -144,9 +225,10 @@ module Crystalfaux
 
       # A move always reports the left button, as Playwright's `ffInput.ts`
       # does. Juggler takes whole pixels (Playwright floors them too).
+      # *buttons* is the `buttons` mask the event reports.
       private def send_button_event(type : Protocol::Page::MouseEventType, button : Button, click_count : Int32?,
-                                    deadline : Time::Instant) : Nil
-        x, y, buttons = @lock.synchronize { {@x, @y, @buttons.sum(&.mask)} }
+                                    buttons : Int32, deadline : Time::Instant) : Nil
+        x, y = @lock.synchronize { {@x, @y} }
         @page.dispatch(Protocol::Page::DispatchMouseEvent.new(type, x.floor, y.floor, button: button.number,
           buttons: buttons, modifiers: @keyboard.modifiers.value, click_count: click_count), deadline)
       end

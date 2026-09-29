@@ -177,22 +177,19 @@ module Crystalfaux
     # `TimeoutError` that names the last failed check, for example
     # `covered by <div id="cover">`, and `ElementDetached` at once when the
     # node left its document.
+    #
+    # Once the checks pass, the click is not tried again. When the mouse
+    # click then times out, the `TimeoutError` says which event did not
+    # finish, as `Page::Mouse#click` reports it; a pressed button is
+    # released.
     def click(timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
       deadline = Time.instant + timeout
-      reason = "no check finished"
-      RETRY_WAITS.each.chain(Iterator.of(RETRY_WAITS.last)).each do |wait|
-        begin
-          failed = try_click(deadline)
-        rescue TimeoutError
-          break
-        end
-        return unless failed
-        reason = failed
-        remaining = deadline - Time.instant
-        break unless remaining.positive?
-        sleep({wait, remaining}.min)
+      x, y = clickable_point(deadline, timeout)
+      begin
+        @frame.page.mouse.click(x, y, timeout: deadline - Time.instant)
+      rescue ex : TimeoutError
+        raise TimeoutError.new("Clicking the element timed out after #{timeout}, after its checks passed: #{ex.message}", cause: ex)
       end
-      raise TimeoutError.new("Clicking the element timed out after #{timeout}: #{reason}")
     end
 
     # Releases the handle in the page. Safe to call more than once; later
@@ -207,9 +204,29 @@ module Crystalfaux
       # The browser released the handle with its context or page.
     end
 
-    # One try of `#click`: returns `nil` after the click, or the check that
-    # failed.
-    private def try_click(deadline : Time::Instant) : String?
+    # Runs the checks of `#click` until they pass, and returns the point to
+    # click. Raises `TimeoutError` with the last failed check when
+    # *deadline* passes first.
+    private def clickable_point(deadline : Time::Instant, timeout : Time::Span) : {Float64, Float64}
+      reason = "no check finished"
+      RETRY_WAITS.each.chain(Iterator.of(RETRY_WAITS.last)).each do |wait|
+        begin
+          checked = check_click(deadline)
+        rescue TimeoutError
+          break
+        end
+        return checked unless checked.is_a?(String)
+        reason = checked
+        remaining = deadline - Time.instant
+        break unless remaining.positive?
+        sleep({wait, remaining}.min)
+      end
+      raise TimeoutError.new("Clicking the element timed out after #{timeout}: #{reason}")
+    end
+
+    # One try of the checks of `#click`: returns the point to click, or the
+    # check that failed.
+    private def check_click(deadline : Time::Instant) : {Float64, Float64} | String
       state = run(DomScripts::ACTIONABLE, [self_argument], deadline).as_s?
       return failed_check(state) unless state == "done"
       if reason = scroll(deadline)
@@ -218,11 +235,7 @@ module Crystalfaux
       point = click_point(content_quads(deadline))
       return "element is not visible" unless point
       x, y = point
-      if reason = hit_path_failure(x, y, deadline)
-        return reason
-      end
-      @frame.page.mouse.click(x, y, timeout: deadline - Time.instant)
-      nil
+      hit_path_failure(x, y, deadline) || point
     end
 
     # Hit-tests the element in its frame, then the frame in each ancestor,
