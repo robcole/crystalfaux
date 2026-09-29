@@ -2,11 +2,12 @@
 
 crystalfaux is a Crystal library that launches and controls
 [Camoufox](https://camoufox.com/), an anti-fingerprinting build of Firefox.
-It speaks Juggler, the Firefox protocol of Playwright, directly over the
-browser's pipe. You do not need Node, Python or a Playwright driver at
-runtime. The API follows [Ferrum](https://github.com/rubycdp/ferrum): a
-browser has contexts, a context has pages, and a page can navigate,
-evaluate JavaScript, take screenshots, send input and intercept requests.
+It speaks [Juggler](#about-juggler), the Firefox automation protocol of
+the Playwright project, directly over the browser's pipe. You do not need
+Node, Python or a Playwright driver at runtime. The API follows
+[Ferrum](https://github.com/rubycdp/ferrum): a browser has contexts, a
+context has pages, and a page can navigate, evaluate JavaScript, take
+screenshots, send input and intercept requests.
 
 ## Requirements
 
@@ -350,6 +351,22 @@ CRYSTALFAUX_CAMOUFOX=/path/to/camoufox scripts/spec --tag browser
 
 `bin/check` and `scripts/spec` keep the compiler cache in `.crystal-cache`
 in the checkout, so runs in different checkouts do not collide.
+
+## About Juggler
+
+Juggler is a remote protocol for Firefox. It is not part of upstream
+Firefox: Mozilla's own automation protocol is WebDriver BiDi. Juggler
+started as the experimental Firefox support in Puppeteer. It then moved to
+the Playwright project, which keeps it as a set of Firefox patches in
+[`browser_patches/firefox/juggler`](https://github.com/microsoft/playwright/tree/main/browser_patches/firefox/juggler).
+The Firefox builds of Playwright include these patches. Camoufox applies
+them too, so it speaks Juggler.
+
+Juggler messages are JSON objects. When a client starts the browser with a
+pipe, the browser reads NUL-terminated messages from file descriptor 3 and
+writes them to file descriptor 4. The Playwright drivers for Node and
+Python use this pipe. crystalfaux uses the same pipe directly, so it does
+not need a Playwright driver.
 
 ## Supported Camoufox builds
 
