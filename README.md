@@ -165,8 +165,10 @@ if card
   card.inner_text # => "PNY GeForce RTX 5090 ..."
 end
 
-# Click a button, and wait for the dialog that it opens late.
-page.get_by_role("button", name: "See all specifications").first.click
+# Click a button, release its handle, and wait for the dialog that it opens late.
+button = page.get_by_role("button", name: "See all specifications").first
+button.click
+button.dispose
 page.wait_for_selector("[role=dialog]", state: :visible)
 
 # Close the dialog, and wait until it is hidden.
