@@ -7,3 +7,5 @@ plans
 /bin/crystalfaux
 # `crystal docs` output.
 /docs/
+# Playwright MCP session logs.
+/.playwright-mcp/
