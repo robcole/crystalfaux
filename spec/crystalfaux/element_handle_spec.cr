@@ -1,0 +1,343 @@
+require "../spec_helper"
+
+private alias DomScripts = Crystalfaux::DomScripts
+
+private def reply(result) : Array(JSON::Any)
+  [json_frame({id: 0, result: result})]
+end
+
+private def error_reply(message : String) : Array(JSON::Any)
+  [json_frame({id: 0, error: {message: message}})]
+end
+
+private def node(object_id : String)
+  {result: {type: "object", subtype: "node", objectId: object_id}}
+end
+
+private def quad(x : Float64, y : Float64, width : Float64, height : Float64)
+  {p1: {x: x, y: y}, p2: {x: x + width, y: y}, p3: {x: x + width, y: y + height}, p4: {x: x, y: y + height}}
+end
+
+# A loaded page and a handle to the element `#go`, whose object id is
+# `obj-1` in the main frame's context `id-3`.
+private def page_with_handle(browser : Crystalfaux::Browser, fake : ScriptedBrowser) : {Crystalfaux::Page, Crystalfaux::ElementHandle}
+  page = loaded_page(browser)
+  fake.on("Runtime.callFunction") { reply(node("obj-1")) }
+  handle = page.query_selector("#go").should_not(be_nil)
+  fake.request("Runtime.callFunction")
+  {page, handle}
+end
+
+# Answers each `Runtime.callFunction` with the block's result for its
+# function declaration.
+private def on_function(fake : ScriptedBrowser, &block : String, JSON::Any -> Array(JSON::Any)) : Nil
+  fake.on("Runtime.callFunction") do |request|
+    params = request["params"]
+    block.call(params["functionDeclaration"].as_s, params)
+  end
+end
+
+describe Crystalfaux::ElementHandle do
+  describe "queries" do
+    it "finds one element as a handle in the frame's isolated context" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.callFunction") { reply(node("obj-1")) }
+
+      handle = page.query_selector("#go").should_not(be_nil)
+
+      params = fake.request("Runtime.callFunction")["params"]
+      params["executionContextId"].should eq("id-3")
+      params["returnByValue"].should be_false
+      params["args"].should eq(json_frame([{value: "#go"}]))
+      handle.remote_object_id.should eq("obj-1")
+      handle.frame.should be(page.main_frame)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "returns nil when no element matches" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.callFunction") { reply({result: {type: "object", subtype: "null", value: nil}}) }
+
+      page.query_selector("#missing").should be_nil
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "finds all elements in order, and releases the array that held them" do
+      browser, fake = scripted_browser
+      page = loaded_page(browser)
+      fake.on("Runtime.callFunction") { reply({result: {type: "object", subtype: "array", objectId: "list-1"}}) }
+      fake.on("Runtime.getObjectProperties") do
+        reply({properties: [
+          {name: "1", value: {type: "object", subtype: "node", objectId: "obj-b"}},
+          {name: "0", value: {type: "object", subtype: "node", objectId: "obj-a"}},
+        ]})
+      end
+
+      page.query_selector_all("li").map(&.remote_object_id).should eq(%w[obj-a obj-b])
+
+      fake.request("Runtime.getObjectProperties")["params"].should eq(json_frame({executionContextId: "id-3", objectId: "list-1"}))
+      fake.request("Runtime.disposeObject")["params"].should eq(json_frame({executionContextId: "id-3", objectId: "list-1"}))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "queries the subtree of a handle with the handle as the root" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { reply(node("obj-2")) }
+
+      handle.query_selector("span").should_not(be_nil).remote_object_id.should eq("obj-2")
+
+      params = fake.request("Runtime.callFunction")["params"]
+      params["args"].should eq(json_frame([{objectId: "obj-1"}, {value: "span"}]))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "#evaluate" do
+    it "passes the element as the first argument, then the values" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { reply({result: {type: "string", value: "Buy"}}) }
+
+      handle.evaluate("(el, suffix, n) => el.textContent + suffix + n", "!", 2).should eq(JSON::Any.new("Buy"))
+
+      params = fake.request("Runtime.callFunction")["params"]
+      params["executionContextId"].should eq("id-3")
+      params["returnByValue"].should be_true
+      params["args"].should eq(json_frame([{objectId: "obj-1"}, {value: "!"}, {value: 2}]))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises EvaluationError when the function throws" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { reply({exceptionDetails: {text: "Error: boom", stack: "@debugger eval"}}) }
+
+      expect_raises(Crystalfaux::EvaluationError, /boom/) { handle.evaluate("el => { throw new Error('boom') }") }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises ExecutionContextDestroyed after a navigation, without a request" do
+      browser, fake = scripted_browser
+      page, handle = page_with_handle(browser, fake)
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+      fake.event("Runtime.executionContextCreated", {executionContextId: "id-11", auxData: {frameId: ProbeScript::FRAME_ID, name: ""}})
+      page.wait_for_events_for_spec
+
+      expect_raises(Crystalfaux::ExecutionContextDestroyed) { handle.text_content }
+      expect_raises(Crystalfaux::ExecutionContextDestroyed) { handle.bounding_box }
+      fake.methods.count("Runtime.callFunction").should eq(1)
+      fake.methods.should_not contain("Page.getContentQuads")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises ExecutionContextDestroyed when the context goes during the call" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      fake.on("Runtime.callFunction") { [] of JSON::Any }
+      outcome = async { handle.evaluate("el => new Promise(() => {})", timeout: 5.seconds) }
+      fake.request("Runtime.callFunction")
+
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+
+      receive_within(outcome, 500.milliseconds).should be_a(Crystalfaux::ExecutionContextDestroyed)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "reading" do
+    it "reads the text, the attributes and the visibility by value" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) do |function, params|
+        case function
+        when DomScripts::TEXT_CONTENT then reply({result: {type: "string", value: " Buy  now "}})
+        when DomScripts::INNER_TEXT   then reply({result: {type: "string", value: "Buy now"}})
+        when DomScripts::VISIBLE      then reply({result: {type: "boolean", value: true}})
+        when DomScripts::ATTRIBUTE
+          params["args"][1]["value"] == "data-sku" ? reply({result: {type: "string", value: "123"}}) : reply({result: {type: "object", subtype: "null", value: nil}})
+        else raise "unexpected function #{function}"
+        end
+      end
+
+      handle.text_content.should eq(" Buy  now ")
+      handle.inner_text.should eq("Buy now")
+      handle.get_attribute("data-sku").should eq("123")
+      handle.get_attribute("title").should be_nil
+      handle.visible?.should be_true
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "measures the bounding box from the content quads" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      fake.on("Page.getContentQuads") { reply({quads: [quad(10, 20, 30, 4), quad(5, 24, 20, 6)]}) }
+
+      handle.bounding_box.should eq(Crystalfaux::Protocol::Page::Rect.new(5, 20, 35, 10))
+
+      fake.request("Page.getContentQuads")["params"].should eq(json_frame({frameId: ProbeScript::FRAME_ID, objectId: "obj-1"}))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "has no bounding box when the element has no layout" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      fake.on("Page.getContentQuads") { reply({quads: [] of String}) }
+
+      handle.bounding_box.should be_nil
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "#scroll_into_view_if_needed" do
+    it "asks the browser to scroll the element's frame" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+
+      handle.scroll_into_view_if_needed
+
+      fake.request("Page.scrollIntoViewIfNeeded")["params"].should eq(json_frame({frameId: ProbeScript::FRAME_ID, objectId: "obj-1"}))
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises ElementDetached for a node that left the document" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      # What Camoufox `additions/juggler/content/PageAgent.js` replies.
+      fake.on("Page.scrollIntoViewIfNeeded") { error_reply("Node is detached from document") }
+
+      expect_raises(Crystalfaux::ElementDetached) { handle.scroll_into_view_if_needed }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "#dispose" do
+    it "releases the handle once, and later calls raise" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+
+      handle.dispose
+      handle.dispose
+
+      fake.request("Runtime.disposeObject")["params"].should eq(json_frame({executionContextId: "id-3", objectId: "obj-1"}))
+      fake.methods.count("Runtime.disposeObject").should eq(1)
+      expect_raises(Crystalfaux::Error, /disposed/) { handle.text_content }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "sends nothing when the context is already gone" do
+      browser, fake = scripted_browser
+      page, handle = page_with_handle(browser, fake)
+      fake.event("Runtime.executionContextDestroyed", {executionContextId: "id-3"})
+      page.wait_for_events_for_spec
+
+      handle.dispose
+
+      fake.methods.should_not contain("Runtime.disposeObject")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+
+  describe "#click" do
+    it "checks the element, scrolls it into view and clicks the centre of its first quad" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) do |function, _|
+        case function
+        when DomScripts::ACTIONABLE then reply({result: {type: "string", value: "done"}})
+        when DomScripts::HIT_TARGET then reply({result: {type: "string", value: "done"}})
+        else                             raise "unexpected function #{function}"
+        end
+      end
+      fake.on("Page.getContentQuads") { reply({quads: [quad(100, 50, 40, 20)]}) }
+
+      handle.click
+
+      methods = fake.methods
+      methods.index!("Page.scrollIntoViewIfNeeded").should be < methods.index!("Page.getContentQuads")
+      events = Array.new(3) { fake.request("Page.dispatchMouseEvent")["params"] }
+      events.map { |event| {event["type"].as_s, event["x"].as_f, event["y"].as_f} }.should eq([
+        {"mousemove", 120.0, 60.0}, {"mousedown", 120.0, 60.0}, {"mouseup", 120.0, 60.0},
+      ])
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "retries until the deadline and names the element that covers it" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) do |function, _|
+        case function
+        when DomScripts::ACTIONABLE then reply({result: {type: "string", value: "done"}})
+        when DomScripts::HIT_TARGET then reply({result: {type: "string", value: %(covered by <div id="cover">)}})
+        else                             raise "unexpected function #{function}"
+        end
+      end
+      fake.on("Page.getContentQuads") { reply({quads: [quad(100, 50, 40, 20)]}) }
+
+      expect_raises(Crystalfaux::TimeoutError, %(covered by <div id="cover">)) { handle.click(timeout: 300.milliseconds) }
+
+      fake.methods.count(&.==("Page.getContentQuads")).should be > 1
+      fake.methods.should_not contain("Page.dispatchMouseEvent")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "names the failed state check when it times out" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) { reply({result: {type: "string", value: "element is not visible"}}) }
+
+      expect_raises(Crystalfaux::TimeoutError, "element is not visible") { handle.click(timeout: 200.milliseconds) }
+      fake.methods.should_not contain("Page.scrollIntoViewIfNeeded")
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "raises ElementDetached at once for a node that left the document" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) { reply({result: {type: "string", value: "notconnected"}}) }
+
+      expect_raises(Crystalfaux::ElementDetached) { handle.click(timeout: 5.seconds) }
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+  end
+end

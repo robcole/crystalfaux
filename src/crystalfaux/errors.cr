@@ -83,7 +83,16 @@ module Crystalfaux
   # execution context, or its context is destroyed before the script
   # returns: by a navigation, or because the frame was detached. Evaluate
   # again after the navigation.
+  #
+  # An `ElementHandle` raises it too once the context it was made in is
+  # gone: query the element again.
   class ExecutionContextDestroyed < Error
+  end
+
+  # Raised by an `ElementHandle` action, such as `ElementHandle#click`, when
+  # the element's node is no longer in its document, for example because
+  # the page re-rendered it. Query the element again.
+  class ElementDetached < Error
   end
 
   # Raised by a page, and by its waiting calls, after the page crashed.

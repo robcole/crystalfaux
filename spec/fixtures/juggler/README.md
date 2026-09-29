@@ -27,6 +27,13 @@ a 2x2 `Page.screenshot`, `Page.dispatchMouseEvent`, `Page.close`,
 Nothing is redacted. Ids, the local server port and timings differ in each
 recording; the specs do not depend on them.
 
+`elements.frames` holds a second, shorter session of the same build: a
+`data:` page with a button below the fold, a `Runtime.callFunction` that
+returns an array handle, `Runtime.getObjectProperties` for its element
+handles, `Page.scrollIntoViewIfNeeded`, `Page.getContentQuads` and
+`Runtime.disposeObject`. It was recorded on 2026-09-28 by the same spec and
+does not end with `Browser.close`.
+
 ## Record again
 
 ```sh
@@ -34,5 +41,5 @@ CRYSTALFAUX_CAMOUFOX=/path/to/camoufox CRYSTALFAUX_RECORD_FIXTURES=1 \
   crystal spec spec/crystalfaux/protocol/recording_spec.cr --tag browser
 ```
 
-Without `CRYSTALFAUX_RECORD_FIXTURES`, the spec runs the same session and
-checks the round trip of the live frames, but does not write the file.
+Without `CRYSTALFAUX_RECORD_FIXTURES`, the spec runs the same sessions and
+checks the round trip of the live frames, but does not write the files.

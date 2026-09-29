@@ -149,6 +149,47 @@ page.evaluate("window.appState", world: :main)  # => {"user" => "Ada"}
 key `allowMainWorld` set to `true` (see the next section). The page can see
 and change what a main-world script uses.
 
+## Elements and waits
+
+`Page#query_selector`, `Page#wait_for_selector` and `Page#get_by_role`
+return `ElementHandle`s. `Frame` has the same methods. A handle reads the
+element, scrolls it into view and clicks it. `click` does Playwright's
+checks first: the element is attached, visible, stable and not covered.
+It tries again until its timeout.
+
+```crystal
+# Wait for a lazy card, scroll it into view, and read it.
+card = page.wait_for_selector(".sku-item", timeout: 10.seconds)
+if card
+  card.scroll_into_view_if_needed
+  card.inner_text # => "PNY GeForce RTX 5090 ..."
+end
+
+# Click a button, and wait for the dialog that it opens late.
+page.get_by_role("button", name: "See all specifications").first.click
+page.wait_for_selector("[role=dialog]", state: :visible)
+
+# Close the dialog, and wait until it is hidden.
+page.get_by_role("button", name: "Close").first.click
+page.wait_for_selector("[role=dialog]", state: :hidden)
+
+# Wait until a script returns a truthy value. A navigation does not stop the wait.
+page.wait_for_function("document.querySelectorAll('.sku-item').length >= 24")
+```
+
+A covered button does not get the click. The `TimeoutError` names the
+element on top, for example `covered by <div id="cover">`.
+
+A handle belongs to the document it was found in. After a navigation, its
+calls raise `ExecutionContextDestroyed`. When the page replaces the node,
+for example in a re-render, `click` and `scroll_into_view_if_needed` raise
+`ElementDetached`. In both cases, query the element again. Call `dispose`
+to release a handle before a navigation releases it.
+
+Scripts run in the isolated world. `get_by_role` knows the `role`
+attribute and the implicit roles `button`, `link`, `dialog`, `checkbox` and
+`heading`. It is not a full `getByRole`.
+
 ## Fingerprint config and proxies
 
 Camoufox reads its fingerprint from a config object at startup.

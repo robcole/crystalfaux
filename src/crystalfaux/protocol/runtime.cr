@@ -104,6 +104,51 @@ module Crystalfaux::Protocol
       end
     end
 
+    # Releases the handle *object_id* of *execution_context_id*. Camoufox
+    # also releases every handle of a context when the context goes
+    # (`additions/juggler/content/Runtime.js`, `disposeObject`).
+    struct DisposeObject
+      include Message
+      include Request(Empty)
+      METHOD = "Runtime.disposeObject"
+
+      field execution_context_id : String
+      field object_id : String
+
+      def initialize(@execution_context_id : String, @object_id : String)
+      end
+    end
+
+    # One enumerable own property of an object, from `GetObjectProperties`.
+    struct ObjectProperty
+      include Message
+
+      field name : String
+      field value : RemoteObject
+    end
+
+    # Lists the enumerable properties of the handle *object_id*, each value
+    # as a new handle in the same context.
+    struct GetObjectProperties
+      include Message
+
+      # The reply of `GetObjectProperties`.
+      struct Result
+        include Message
+
+        field properties : Array(ObjectProperty)
+      end
+
+      include Request(Result)
+      METHOD = "Runtime.getObjectProperties"
+
+      field execution_context_id : String
+      field object_id : String
+
+      def initialize(@execution_context_id : String, @object_id : String)
+      end
+    end
+
     # The `Runtime.executionContextCreated` event.
     struct ExecutionContextCreated
       include Message

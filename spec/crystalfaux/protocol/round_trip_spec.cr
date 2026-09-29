@@ -31,6 +31,19 @@ describe "Juggler protocol round trip" do
     ].each { |method| decoded.should contain(method) }
   end
 
+  it "decodes and re-encodes the recorded element frames" do
+    frames = JugglerFrame.load(File.expand_path("../../fixtures/juggler/elements.frames", __DIR__))
+    round_trip = JugglerRoundTrip.new(frames)
+
+    round_trip.failures.should be_empty
+    %w[
+      Runtime.getObjectProperties Runtime.disposeObject Page.scrollIntoViewIfNeeded Page.getContentQuads
+    ].each do |method|
+      round_trip.decoded.should contain(method)
+      round_trip.decoded.should contain("#{method} result")
+    end
+  end
+
   it "reports a recorded field that a struct does not carry" do
     frames = [JugglerFrame.parse(%(< {"method":"Page.frameAttached","params":{"frameId":"f","extra":1}}))]
 

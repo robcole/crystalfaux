@@ -3,7 +3,8 @@ require "http/server"
 
 private alias Protocol = Crystalfaux::Protocol
 
-private FIXTURE = File.expand_path("../../fixtures/juggler/probe.frames", __DIR__)
+private FIXTURE          = File.expand_path("../../fixtures/juggler/probe.frames", __DIR__)
+private ELEMENTS_FIXTURE = File.expand_path("../../fixtures/juggler/elements.frames", __DIR__)
 
 # Serves one page that sets a cookie, so the probe records network events.
 private def start_page_server : {HTTP::Server, String}
@@ -67,6 +68,26 @@ private class Probe
     null_argument = [Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new(nil))]
     kind = call(Protocol::Runtime::CallFunction.new(@execution_context_id, "(a) => a === null", null_argument, true))
     kind.result.try(&.value).should eq(JSON::Any.new(true))
+  end
+
+  # Opens a page with a button below the fold and uses the element
+  # methods on it: handles by `Runtime.callFunction`, a list of handles by
+  # `Runtime.getObjectProperties`, `Page.scrollIntoViewIfNeeded`,
+  # `Page.getContentQuads` and `Runtime.disposeObject`.
+  def run_elements : Nil
+    open_page
+    load("data:text/html,<!DOCTYPE html><div style='height:2000px'></div><button>Buy</button>")
+    selector = [Protocol::Runtime::CallFunctionArgument.new(value: JSON::Any.new("button"))]
+    list = call(Protocol::Runtime::CallFunction.new(@execution_context_id,
+      "selector => Array.from(document.querySelectorAll(selector))", selector, false)).result
+    list_id = list.try(&.object_id).should_not(be_nil)
+    properties = call(Protocol::Runtime::GetObjectProperties.new(@execution_context_id, list_id)).properties
+    call(Protocol::Runtime::DisposeObject.new(@execution_context_id, list_id))
+    button_id = properties.first.value.object_id.should_not(be_nil)
+    call(Protocol::Page::ScrollIntoViewIfNeeded.new(@frame_id, button_id))
+    call(Protocol::Page::GetContentQuads.new(@frame_id, button_id)).quads.size.should eq(1)
+    call(Protocol::Runtime::DisposeObject.new(@execution_context_id, button_id))
+    close_page
   end
 
   private def evaluate_value(expression : String) : JSON::Any?
@@ -171,5 +192,21 @@ describe "Juggler fixture recording", tags: "browser" do
     connection.try &.close
     browser.try &.close
     server.try &.close
+  end
+
+  it "records the element methods and every frame round-trips through the typed structs" do
+    binary = camoufox_binary
+    browser = Crystalfaux::Launcher::BrowserProcess.launch(Crystalfaux::Launcher::Options.new(executable: binary))
+    relay = RecordingRelay.new(browser.transport)
+    connection = Crystalfaux::Juggler::Connection.new(relay.transport)
+
+    Probe.new(connection, relay).run_elements
+
+    frames = relay.frames
+    JugglerRoundTrip.new(frames).failures.should be_empty
+    File.write(ELEMENTS_FIXTURE, frames.join('\n') + '\n') if ENV["CRYSTALFAUX_RECORD_FIXTURES"]?
+  ensure
+    connection.try &.close
+    browser.try &.close
   end
 end

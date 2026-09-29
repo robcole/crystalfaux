@@ -181,6 +181,81 @@ module Crystalfaux::Protocol
       end
     end
 
+    # The `DOMPoint` type of the Juggler schema.
+    struct Point
+      include Message
+
+      field x : Float64
+      field y : Float64
+    end
+
+    # The `DOMQuad` type of the Juggler schema: four corners, clockwise from
+    # the top left for an element without a transform.
+    struct Quad
+      include Message
+
+      field p1 : Point
+      field p2 : Point
+      field p3 : Point
+      field p4 : Point
+
+      # The corners in order.
+      def points : {Point, Point, Point, Point}
+        {p1, p2, p3, p4}
+      end
+    end
+
+    # The `Rect` type of the Juggler schema.
+    struct Rect
+      include Message
+
+      field x : Float64
+      field y : Float64
+      field width : Float64
+      field height : Float64
+
+      def initialize(@x : Float64, @y : Float64, @width : Float64, @height : Float64)
+      end
+    end
+
+    # Scrolls the element *object_id* of frame *frame_id* into view unless
+    # it is already visible.
+    struct ScrollIntoViewIfNeeded
+      include Message
+      include Request(Empty)
+      METHOD = "Page.scrollIntoViewIfNeeded"
+
+      field frame_id : String
+      field object_id : String
+      field rect : Rect?
+
+      def initialize(@frame_id : String, @object_id : String, @rect : Rect? = nil)
+      end
+    end
+
+    # The border-box quads of the element *object_id* of frame *frame_id*,
+    # in CSS pixels relative to the main frame's viewport. An element that
+    # is not rendered has none.
+    struct GetContentQuads
+      include Message
+
+      # The reply of `GetContentQuads`.
+      struct Result
+        include Message
+
+        field quads : Array(Quad)
+      end
+
+      include Request(Result)
+      METHOD = "Page.getContentQuads"
+
+      field frame_id : String
+      field object_id : String
+
+      def initialize(@frame_id : String, @object_id : String)
+      end
+    end
+
     # The `Page.ready` event.
     struct Ready
       include Message

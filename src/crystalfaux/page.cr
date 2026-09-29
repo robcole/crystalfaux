@@ -48,8 +48,8 @@ module Crystalfaux
   #   comes. Other pages on the connection are not affected.
   # - `Page.crashed` marks the page crashed: waiters, pending requests and
   #   later calls raise `PageCrashed`. `#close` still works.
-  # - An evaluation registers its own `Juggler::Cancellation` under its
-  #   execution context. When the page forgets the context, it cancels the
+  # - An evaluation, and each call of an `ElementHandle`, registers its own
+  #   `Juggler::Cancellation` under its execution context. When the page forgets the context, it cancels the
   #   evaluation with `ExecutionContextDestroyed`; closing the page, or a
   #   crash, cancels it with the reason, as for other requests.
   # - The page's `Traffic` follows its network events and runs
@@ -192,27 +192,76 @@ module Crystalfaux
 
     # Runs `Frame#evaluate` for *frame*, a frame of this page.
     protected def evaluate_in(frame : Frame, expression : String, world : World, deadline : Time::Instant) : JSON::Any
-      context_id, cancellation = start_evaluation(frame)
+      context_id = frame.default_context_id || raise ExecutionContextDestroyed.new("Frame #{frame.id} has no execution context")
+      outcome = case world
+                in .isolated?
+                  call_in_context(frame, context_id, Protocol::Runtime::Evaluate.new(context_id, expression, return_by_value: true), deadline)
+                in .main?
+                  call_in_context(frame, context_id, Protocol::Runtime::MainWorld.request(context_id, expression), deadline)
+                end
+      result = script_result(outcome)
+      case world
+      in .isolated? then value_of(result)
+      in .main?     then Protocol::Runtime::MainWorld.decode(result.try(&.value))
+      end
+    end
+
+    # Sends *request*, which works on the objects of execution context
+    # *context_id* of *frame*, as an evaluation in that context: when the
+    # page forgets the context, the call raises `ExecutionContextDestroyed`,
+    # also before it is sent. `Frame` and `ElementHandle` use it.
+    protected def call_in_context(frame : Frame, context_id : String, request : Protocol::Request(R),
+                                  deadline : Time::Instant) : R forall R
+      cancellation = start_evaluation(frame, context_id)
       begin
-        outcome = case world
-                  in .isolated?
-                    call(Protocol::Runtime::Evaluate.new(context_id, expression, return_by_value: true), deadline, cancellation)
-                  in .main?
-                    call(Protocol::Runtime::MainWorld.request(context_id, expression), deadline, cancellation)
-                  end
+        call(request, deadline, cancellation)
       rescue ex : ProtocolError
         raise evaluation_failure(ex, frame)
       ensure
         finish_evaluation(context_id, cancellation)
       end
+    end
+
+    # The result of *outcome*; raises `EvaluationError` when the script threw.
+    protected def script_result(outcome : Protocol::Runtime::EvaluationResult) : Protocol::Runtime::RemoteObject?
       if details = outcome.exception_details
         message = details.text || details.value.try(&.to_json) || "The script threw"
         raise EvaluationError.new(message, details.stack)
       end
-      case world
-      in .isolated? then value_of(outcome.result)
-      in .main?     then Protocol::Runtime::MainWorld.decode(outcome.result.try(&.value))
-      end
+      outcome.result
+    end
+
+    # Returns the first element in the main frame that CSS *selector*
+    # matches, or `nil`. See `Frame#query_selector`.
+    def query_selector(selector : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : ElementHandle?
+      main_frame.query_selector(selector, timeout)
+    end
+
+    # Returns every element in the main frame that CSS *selector* matches.
+    # See `Frame#query_selector_all`.
+    def query_selector_all(selector : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Array(ElementHandle)
+      main_frame.query_selector_all(selector, timeout)
+    end
+
+    # Evaluates *expression* in the main frame until it is truthy and
+    # returns that value. See `Frame#wait_for_function`.
+    def wait_for_function(expression : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT, *,
+                          polling : Time::Span = Frame::POLLING, world : World = :isolated) : JSON::Any
+      main_frame.wait_for_function(expression, timeout, polling: polling, world: world)
+    end
+
+    # Waits until the element that CSS *selector* matches in the main frame
+    # is in *state*. See `Frame#wait_for_selector`.
+    def wait_for_selector(selector : String, *, state : ElementState = :visible,
+                          timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : ElementHandle?
+      main_frame.wait_for_selector(selector, state: state, timeout: timeout)
+    end
+
+    # Returns the elements of the main frame with ARIA *role* and accessible
+    # *name*. See `Frame#get_by_role`.
+    def get_by_role(role : String, *, name : String? = nil, exact : Bool = true,
+                    timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Array(ElementHandle)
+      main_frame.get_by_role(role, name: name, exact: exact, timeout: timeout)
     end
 
     # The title of the main frame's document.
@@ -474,17 +523,16 @@ module Crystalfaux
       Base64.decode(data)
     end
 
-    # Registers an evaluation in *frame*'s execution context and returns
-    # the context and the evaluation's cancellation. Raises the page's
-    # failure, or `ExecutionContextDestroyed` when the frame has no context.
-    private def start_evaluation(frame : Frame) : {String, Juggler::Cancellation}
+    # Registers an evaluation in execution context *context_id* of *frame*
+    # and returns its cancellation. Raises the page's failure, or
+    # `ExecutionContextDestroyed` when the page no longer tracks the context.
+    private def start_evaluation(frame : Frame, context_id : String) : Juggler::Cancellation
       @lock.synchronize do
         raise_failure
-        context_id = @context_frames.key_for?(frame)
-        raise ExecutionContextDestroyed.new("Frame #{frame.id} has no execution context") unless context_id
+        raise context_lost(frame) unless @context_frames[context_id]?.same?(frame)
         cancellation = Juggler::Cancellation.new
         (@evaluations[context_id] ||= [] of Juggler::Cancellation) << cancellation
-        {context_id, cancellation}
+        cancellation
       end
     end
 
@@ -525,7 +573,8 @@ module Crystalfaux
       value.as_s? || raise Error.new("Expected a string from #{expression.inspect}, got #{value.to_json}")
     end
 
-    private def value_of(remote : Protocol::Runtime::RemoteObject?) : JSON::Any
+    # The JSON value of *remote*, a result by value.
+    protected def value_of(remote : Protocol::Runtime::RemoteObject?) : JSON::Any
       return JSON::Any.new(nil) unless remote
       if special = remote.unserializable_value
         return JSON::Any.new(
