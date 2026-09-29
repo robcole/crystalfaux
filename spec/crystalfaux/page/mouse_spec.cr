@@ -148,6 +148,49 @@ describe Crystalfaux::Page::Mouse do
       fake.try &.close
     end
 
+    it "raises TimeoutError when the release is acknowledged after the deadline" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      fake.on("Page.dispatchMouseEvent") do |request|
+        sleep 400.milliseconds if request["params"]["type"] == "mouseup"
+        [json_frame({id: 0})]
+      end
+
+      expect_raises(Crystalfaux::TimeoutError, "mouseup") { page.mouse.click(10, 20, timeout: 100.milliseconds) }
+      page.mouse.move(30, 40)
+
+      params_of(fake, "Page.dispatchMouseEvent", 4).map { |event| {event["type"].as_s, event["buttons"].as_i} }.should eq([
+        {"mousemove", 0}, {"mousedown", 1}, {"mouseup", 0}, {"mousemove", 0},
+      ])
+      fake.methods.count("Page.dispatchMouseEvent").should eq(4)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
+    it "keeps the timeout as the cause and names the release when the cleanup fails" do
+      browser, fake = scripted_browser
+      page = browser.new_context.new_page
+      fake.on("Page.dispatchMouseEvent") do |request|
+        request["params"]["type"] == "mousemove" ? [json_frame({id: 0})] : [] of JSON::Any
+      end
+
+      started = Time.instant
+      error = expect_raises(Crystalfaux::TimeoutError) { page.mouse.click(10, 20, timeout: 100.milliseconds) }
+      (Time.instant - started).should be < 3.seconds
+      page.mouse.move(30, 40)
+
+      error.message.to_s.should contain("Releasing the button failed")
+      error.cause.should be_a(Crystalfaux::TimeoutError)
+      params_of(fake, "Page.dispatchMouseEvent", 4).map { |event| {event["type"].as_s, event["buttons"].as_i} }.should eq([
+        {"mousemove", 0}, {"mousedown", 1}, {"mouseup", 0}, {"mousemove", 0},
+      ])
+      fake.methods.count("Page.dispatchMouseEvent").should eq(4)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
     # A mouse request is cancelled only by the page's own cancellation,
     # which closing the page or a crash fires: the page is then gone while
     # the transport still works.

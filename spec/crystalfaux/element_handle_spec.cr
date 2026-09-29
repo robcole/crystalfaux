@@ -484,6 +484,29 @@ describe Crystalfaux::ElementHandle do
       fake.try &.close
     end
 
+    it "times out when the release is acknowledged after the deadline" do
+      browser, fake = scripted_browser
+      _, handle = page_with_handle(browser, fake)
+      on_function(fake) do |function, _|
+        function == DomScripts::HIT_TARGET ? reply(verdict("done")) : reply({result: {type: "string", value: "done"}})
+      end
+      fake.on("Page.getContentQuads") { reply({quads: [quad(100, 50, 40, 20)]}) }
+      fake.on("Page.dispatchMouseEvent") do |request|
+        sleep 600.milliseconds if request["params"]["type"] == "mouseup"
+        reply({} of String => String)
+      end
+
+      error = expect_raises(Crystalfaux::TimeoutError) { handle.click(timeout: 300.milliseconds) }
+
+      error.message.to_s.should contain("mouseup")
+      methods = fake.methods
+      methods.count("Page.dispatchMouseEvent").should eq(3)
+      methods.count("Page.getContentQuads").should eq(1)
+    ensure
+      browser.try &.close
+      fake.try &.close
+    end
+
     it "checks that each ancestor frame lets the click reach the element's frame" do
       browser, fake = scripted_browser
       page = loaded_page(browser)
