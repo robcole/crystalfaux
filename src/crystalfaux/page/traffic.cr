@@ -57,7 +57,9 @@ module Crystalfaux
         spawn(name: "crystalfaux-request") { decide(request) } if request.intercepted?
       end
 
-      def response_received(event : Protocol::Network::ResponseReceived) : Nil
+      # Returns the response, or `nil` for a request that the traffic does
+      # not follow.
+      def response_received(event : Protocol::Network::ResponseReceived) : Response?
         handlers, response = @lock.synchronize do
           request = @requests[event.request_id]?
           return unless request
@@ -65,8 +67,10 @@ module Crystalfaux
           @responses[request.id] = received
           {@response_handlers.dup, received}
         end
-        return if handlers.empty?
-        spawn(name: "crystalfaux-response") { handlers.each { |handler| run(handler, response) } }
+        unless handlers.empty?
+          spawn(name: "crystalfaux-response") { handlers.each { |handler| run(handler, response) } }
+        end
+        response
       end
 
       def request_finished(request_id : String) : Nil

@@ -1,6 +1,7 @@
 # Portions of this file are translated to Crystal from Playwright
 # (https://github.com/microsoft/playwright):
-# - `packages/playwright-core/src/server/frames.ts` (`Frame.content`)
+# - `packages/playwright-core/src/server/frames.ts` (`Frame.content`,
+#   `Frame.gotoImpl`)
 # - `packages/playwright-core/src/server/screenshotter.ts`
 #
 # Copyright 2017 Google Inc. Modifications copyright (c) Microsoft Corporation.
@@ -134,21 +135,37 @@ module Crystalfaux
       main_frame.url
     end
 
-    # Navigates the main frame to *url* and returns after its `load` event.
+    # Navigates the main frame to *url*, waits for *wait_until* (by
+    # default the `load` event of the new document) and returns the
+    # response of the document. After redirects, it is the last response.
+    #
+    # ```
+    # response = page.goto("https://example.com/")
+    # response.try(&.status) # => 200
+    #
+    # page.goto("https://example.com/", wait_until: :dom_content_loaded)
+    # ```
+    #
+    # Returns `nil` for a navigation within the same document, which
+    # returns without waiting, and for a URL without a network response,
+    # such as `about:blank` or a `data:` URL. An error status, such as 404,
+    # does not raise.
     #
     # Raises `NavigationError` when the navigation is aborted or another
-    # navigation of the main frame commits before its `load`, `TimeoutError`
-    # when it does not load within *timeout*, `ProtocolError` when the
-    # browser rejects the URL, and `PageCrashed`, `PageClosed` or
-    # `ConnectionClosed` when the page goes away first. A navigation within
-    # the same document returns without waiting.
-    def goto(url : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT) : Nil
+    # navigation of the main frame commits before *wait_until*,
+    # `TimeoutError` when *wait_until* does not come within *timeout*,
+    # `ProtocolError` when the browser rejects the URL, and `PageCrashed`,
+    # `PageClosed` or `ConnectionClosed` when the page goes away first.
+    # Camoufox aborts a navigation to an error status with an empty body;
+    # then `NavigationError#response` is the response.
+    def goto(url : String, timeout : Time::Span = Browser::DEFAULT_TIMEOUT,
+             wait_until : WaitUntil = :load) : Response?
       deadline = Time.instant + timeout
       frame_id = main_frame.id
       with_waiter do |waiter|
         navigation_id = call(Protocol::Page::Navigate.new(frame_id, url), deadline).navigation_id
         return unless navigation_id
-        wait_for_load(waiter, frame_id, navigation_id, deadline, "Navigation to #{url}")
+        wait_for_navigation(waiter, frame_id, navigation_id, wait_until, deadline, "Navigation to #{url}")
       end
     end
 
@@ -376,33 +393,66 @@ module Crystalfaux
       end
     end
 
-    # Waits for the `load` of the document that navigation *navigation_id*
-    # commits in *frame_id*. A `load` before that commit belongs to the
-    # previous document. A later commit of another navigation replaces the
-    # document before it loads, as Playwright treats an interrupted
+    # Waits until the document that navigation *navigation_id* commits in
+    # *frame_id* reaches *wait_until*, and returns the document's response.
+    #
+    # A lifecycle event before that commit belongs to the previous
+    # document. A later commit of another navigation replaces the document
+    # before it reaches *wait_until*, as Playwright treats an interrupted
     # navigation.
-    private def wait_for_load(waiter : Waiter, frame_id : String, navigation_id : String,
-                              deadline : Time::Instant, description : String) : Nil
+    #
+    # The response is the last one for a request of the navigation, which
+    # is the final response after redirects. Camoufox sends it before the
+    # commit or abort. As in Playwright (`server/firefox/ffNetworkManager.ts`
+    # gives each request the event's `navigationId` as its document id, and
+    # `server/frames.ts` takes the response of the pending document's
+    # request), the request is matched by navigation id and frame, not by
+    # URL.
+    #
+    # Playwright raises when the navigation aborts, even after a response
+    # (`Frame.gotoImpl` throws the error of `frameAbortedNavigation`). So
+    # does this method, and the `NavigationError` carries that response.
+    private def wait_for_navigation(waiter : Waiter, frame_id : String, navigation_id : String, wait_until : WaitUntil,
+                                    deadline : Time::Instant, description : String) : Response?
       committed = false
+      response = nil
       waiter.wait(deadline, description) do |event|
         case event
+        when Response
+          response = event if navigation_request?(event.request, frame_id, navigation_id)
+          false
         when Protocol::Page::NavigationCommitted
           next false unless event.frame_id == frame_id
           if committed
             raise NavigationError.new("#{description} was replaced by navigation to #{event.url} before it loaded")
           end
           committed = event.navigation_id == navigation_id
-          false
+          committed && wait_until.commit?
         when Protocol::Page::NavigationAborted
-          if event.frame_id == frame_id && event.navigation_id == navigation_id
-            raise NavigationError.new("#{description} was aborted: #{event.error_text}")
+          if {event.frame_id, event.navigation_id} == {frame_id, navigation_id}
+            raise NavigationError.new("#{description} was aborted: #{event.error_text}", response)
           end
           false
         when Protocol::Page::EventFired
-          committed && event.frame_id == frame_id && event.name.load?
+          committed && event.frame_id == frame_id && reached?(wait_until, event.name)
         else
           false
         end
+      end
+      response
+    end
+
+    # Whether *request* loads the document of navigation *navigation_id*
+    # in *frame_id*. The protocol leaves out the frame of a redirect.
+    private def navigation_request?(request : Request, frame_id : String, navigation_id : String) : Bool
+      request.navigation_id == navigation_id && request.frame_id.in?(frame_id, nil)
+    end
+
+    private def reached?(wait_until : WaitUntil, event : Protocol::Page::LifecycleEvent) : Bool
+      case wait_until
+      in .load?               then event.load?
+      in .dom_content_loaded? then event.dom_content_loaded?
+      in .commit?             then true
       end
     end
 
@@ -540,7 +590,10 @@ module Crystalfaux
       end
       listen(Protocol::Runtime::ExecutionContextsCleared) { update { contexts_cleared } }
       listen(Protocol::Network::RequestWillBeSent) { |event| @traffic.request_will_be_sent(self, event) }
-      listen(Protocol::Network::ResponseReceived) { |event| @traffic.response_received(event) }
+      listen(Protocol::Network::ResponseReceived) do |event|
+        response = @traffic.response_received(event)
+        update(response) { } if response.try(&.request.navigation?)
+      end
       listen(Protocol::Network::RequestFinished) { |event| @traffic.request_finished(event.request_id) }
       listen(Protocol::Network::RequestFailed) { |event| @traffic.request_failed(event) }
     end

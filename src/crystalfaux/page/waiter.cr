@@ -2,8 +2,8 @@ module Crystalfaux
   class Page
     # :nodoc:
     #
-    # Queues a page's lifecycle events for one waiting call, such as
-    # `Page#goto`.
+    # Queues a page's lifecycle events, and the responses of navigation
+    # requests, for one waiting call, such as `Page#goto`.
     #
     # The page registers the waiter before the call sends its request, so
     # events that arrive before the reply are kept. The page's event
@@ -13,7 +13,7 @@ module Crystalfaux
     # closes. The page removes the waiter when the call returns.
     class Waiter
       alias Event = Protocol::Page::NavigationCommitted | Protocol::Page::NavigationAborted |
-                    Protocol::Page::EventFired | Protocol::Page::Ready
+                    Protocol::Page::EventFired | Protocol::Page::Ready | Response
 
       @events = Deque(Event).new
       @failure : Exception?

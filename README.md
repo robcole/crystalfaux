@@ -95,6 +95,45 @@ CRYSTALFAUX_CAMOUFOX=/path/to/camoufox crystal run examples/quick_start.cr
 | [`pool.cr`](examples/pool.cr) | Run jobs on a pool of browsers that the pool replaces. |
 | [`fingerprint.cr`](examples/fingerprint.cr) | Launch with the committed macOS fingerprint ([`examples/fingerprints/`](examples/fingerprints/README.md)) or a config file, and use the main world. |
 
+## Navigation
+
+`Page#goto` returns the response of the document. After redirects, it is
+the last response. An error status, such as 404, does not raise.
+
+```crystal
+response = page.goto("https://example.com/")
+response.try(&.status) # => 200
+```
+
+`goto` returns `nil` for a navigation within the document (`#anchor`) and
+for a URL without a network response, such as `about:blank` or a `data:`
+URL.
+
+Camoufox aborts a navigation to an error status with an empty body, for
+example a 403 block page with no content. Then `goto` raises
+`NavigationError`, as Playwright does, and the error has the response:
+
+```crystal
+begin
+  page.goto(url)
+rescue ex : Crystalfaux::NavigationError
+  ex.response.try(&.status) # => 403
+end
+```
+
+By default, `goto` waits for the `load` event. Use `wait_until` to return
+sooner:
+
+| `wait_until` | `goto` returns when |
+| --- | --- |
+| `:load` (default) | The document and its subresources have loaded. |
+| `:dom_content_loaded` | The document is parsed. Images can still be loading. |
+| `:commit` | The response arrived and the new document replaced the old one. |
+
+```crystal
+page.goto(url, wait_until: :dom_content_loaded)
+```
+
 ## Evaluate JavaScript
 
 `Page#evaluate` and `Frame#evaluate` return the value as `JSON::Any`.

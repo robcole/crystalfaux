@@ -40,7 +40,27 @@ module Crystalfaux
 
   # Raised when a navigation fails before its document commits, for example
   # when another navigation replaces it.
+  #
+  # A navigation can fail after its response arrived. For example, Camoufox
+  # aborts a navigation to an error status with an empty body, such as a
+  # 404 or a 403 block page, with `NS_ERROR_NET_EMPTY_RESPONSE`. Then
+  # `#response` is that response:
+  #
+  # ```
+  # begin
+  #   page.goto(url)
+  # rescue ex : Crystalfaux::NavigationError
+  #   ex.response.try(&.status) # => 404
+  # end
+  # ```
   class NavigationError < Error
+    # The response of the navigation's document, when it arrived before the
+    # navigation failed.
+    getter response : Response?
+
+    def initialize(message : String, @response : Response? = nil)
+      super(message)
+    end
   end
 
   # Raised when a script that `Frame#evaluate` or `Page#evaluate` runs

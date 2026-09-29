@@ -45,7 +45,11 @@ module Crystalfaux
     # The page that sent the request.
     getter page : Page
 
-    @navigation : Bool
+    # The id of the navigation that the request loads a document for;
+    # `nil` unless `#navigation?`. The requests of one navigation's
+    # redirects share it.
+    getter navigation_id : String?
+
     @intercepted : Bool
     @decided = Atomic(Bool).new(false)
 
@@ -58,13 +62,13 @@ module Crystalfaux
       @post_data = event.post_data.try { |encoded| Base64.decode(encoded) }
       @resource_type = ResourceType.from_cause(event.cause, event.internal_cause)
       @frame_id = event.frame_id
-      @navigation = !event.navigation_id.nil?
+      @navigation_id = event.navigation_id
       @intercepted = event.is_intercepted
     end
 
     # Whether the request loads a frame's document.
     def navigation? : Bool
-      @navigation
+      !@navigation_id.nil?
     end
 
     # Whether the browser holds the request until it is decided.
